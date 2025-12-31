@@ -188,11 +188,12 @@ class TocantinsIntegration:
 
             return is_raster
 
+        except TocantinsCalculationError as e:
+            logger.error(f"Tocantins calculation failed: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Failed to extract Impact Scores: {str(e)}")
-            # Return zeros if extraction fails
-            classification_map = calculator.get_classification_map()
-            return np.zeros_like(classification_map, dtype=np.float32)
+            logger.critical(f"Unexpected error in IS extraction: {e}")
+            raise RuntimeError("Critical preprocessing failure") from e
 
     def _extract_severity_scores(
         self,
