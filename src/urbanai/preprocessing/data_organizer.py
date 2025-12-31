@@ -73,9 +73,7 @@ class TemporalDataProcessor:
         Returns:
             Dictionary mapping year to output file path
         """
-        logger.info("=" * 80)
-        logger.info("TEMPORAL DATA PROCESSING")
-        logger.info("=" * 80)
+        logger.info("Starting temporal data processing...")
 
         # Find available files
         available_files = sorted(self.raw_dir.glob("*_cropped.tif"))
@@ -94,8 +92,7 @@ class TemporalDataProcessor:
 
         # Step 1: Calculate spectral indices
         if calculate_indices:
-            logger.info("\n[1/2] CALCULATING SPECTRAL INDICES")
-            logger.info("-" * 80)
+            logger.info("Step 1/2: Calculating spectral indices...")
 
             indices_dir = self.output_dir / "indices"
             indices_results = self.band_processor.process_time_series(
@@ -108,8 +105,7 @@ class TemporalDataProcessor:
 
         # Step 2: Calculate Tocantins scores
         if calculate_tocantins:
-            logger.info("\n[2/2] CALCULATING TOCANTINS SCORES")
-            logger.info("-" * 80)
+            logger.info("Step 2/2: Calculating Tocantins scores...")
 
             # Use indices as input for Tocantins
             if calculate_indices:
@@ -132,9 +128,7 @@ class TemporalDataProcessor:
             year = self._extract_year(path.name)
             final_files[year] = path
 
-        logger.info("\n" + "=" * 80)
-        logger.info(f"PROCESSING COMPLETE: {len(final_files)} years ready")
-        logger.info("=" * 80)
+        logger.info(f"Processing complete: {len(final_files)} years ready.")
 
         return final_files
 
@@ -202,7 +196,7 @@ class TemporalDataProcessor:
                 logger.error(f"Error validating {file_path}: {str(e)}")
                 return False
 
-        logger.info(f"✓ All {len(output_files)} files validated successfully")
+        logger.info(f"All {len(output_files)} files validated successfully.")
         return True
 
     def get_temporal_statistics(self) -> Dict:
@@ -262,4 +256,3 @@ class TemporalDataProcessor:
                 "random_state": 42,
             },
         }
-      
