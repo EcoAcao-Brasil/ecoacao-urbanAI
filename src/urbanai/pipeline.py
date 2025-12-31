@@ -101,9 +101,9 @@ class UrbanAIPipeline:
         Returns:
             Dictionary containing all results and output paths
         """
-        logger.info("=" * 80)
+        
         logger.info("URBANAI PIPELINE EXECUTION")
-        logger.info("=" * 80)
+        
 
         results = {
             "status": "running",
@@ -147,9 +147,9 @@ class UrbanAIPipeline:
                 results["visualizations"] = viz_outputs
 
             results["status"] = "success"
-            logger.info("\n" + "=" * 80)
+            logger.info("\n")
             logger.info("PIPELINE COMPLETED SUCCESSFULLY")
-            logger.info("=" * 80)
+            
 
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
