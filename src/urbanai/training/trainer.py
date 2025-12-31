@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -26,7 +27,8 @@ class UrbanAITrainer:
     Orchestrates the model training process.
 
     This class abstracts away the PyTorch boilerplate, handling device 
-    management, gradient updates, and metric tracking (TensorBoard/Console).
+    management, gradient updates, metric tracking (TensorBoard/Console),
+    and checkpointing with metadata.
     """
 
     def __init__(
@@ -77,9 +79,6 @@ class UrbanAITrainer:
     ) -> Dict[str, Any]:
         """
         Executes the main training loop.
-        
-        Handles learning rate overrides, dataloader creation, and the 
-        early stopping logic based on validation loss.
         """
         logger.info("Starting training...")
 
@@ -90,13 +89,11 @@ class UrbanAITrainer:
 
         train_loader, val_loader = create_dataloaders(
             data_dir=self.data_dir,
-            sequence_length=self.config["sequence_length"],
-            prediction_horizon=self.config["prediction_horizon"],
-            batch_size=batch_size,
-            num_workers=self.config.get("num_workers", 4),
-            normalize=True,
-            augment_train=True,
+            config=self.config,
         )
+        
+        # Capture dataset reference to extract normalization stats later
+        train_dataset = train_loader.dataset
 
         patience_counter = 0
 
@@ -117,21 +114,22 @@ class UrbanAITrainer:
             # Checkpointing logic
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
-                self._save_checkpoint("best")
+                # Pass dataset to save stats
+                self._save_checkpoint("best", train_dataset=train_dataset)
                 patience_counter = 0
                 logger.info(f"New best model (val_loss: {val_loss:.6f})")
             else:
                 patience_counter += 1
 
             if (epoch + 1) % save_every == 0:
-                self._save_checkpoint(f"epoch_{epoch+1}")
+                self._save_checkpoint(f"epoch_{epoch+1}", train_dataset=train_dataset)
 
             if patience_counter >= early_stopping_patience:
                 logger.info(f"Early stopping triggered after {epoch+1} epochs")
                 break
 
-        # Ensure we always have the final state saved
-        self._save_checkpoint("last")
+        # Ensure we always have the final state saved with stats
+        self._save_checkpoint("last", train_dataset=train_dataset)
         self.writer.close()
 
         logger.info("Training completed")
@@ -143,7 +141,7 @@ class UrbanAITrainer:
             "final_epoch": self.current_epoch,
         }
 
-    def _train_epoch(self, train_loader: torch.utils.data.DataLoader) -> float:
+    def _train_epoch(self, train_loader: DataLoader) -> float:
         """Runs a single pass over the training set."""
         self.model.train()
         total_loss = 0.0
@@ -178,7 +176,7 @@ class UrbanAITrainer:
 
     def _validate_epoch(
         self,
-        val_loader: torch.utils.data.DataLoader,
+        val_loader: DataLoader,
     ) -> tuple[float, Dict[str, float]]:
         """Evaluates the model on the validation set without gradient tracking."""
         self.model.eval()
@@ -234,8 +232,11 @@ class UrbanAITrainer:
         for metric_name, metric_value in metrics.items():
             self.writer.add_scalar(f"Metrics/{metric_name}", metric_value, epoch)
 
-    def _save_checkpoint(self, name: str) -> None:
-        """Serializes model state, optimizer state, and history to disk."""
+    def _save_checkpoint(self, name: str, train_dataset: Optional[Dataset] = None) -> None:
+        """
+        Serializes model state, optimizer state, and history to disk.
+        Includes normalization statistics to enable correct denormalization during inference.
+        """
         checkpoint_path = self.output_dir / f"convlstm_{name}.pth"
 
         checkpoint = {
@@ -245,7 +246,24 @@ class UrbanAITrainer:
             "best_val_loss": self.best_val_loss,
             "history": self.history,
             "config": self.config,
+            # Placeholders for normalization info
+            "normalization_stats": None,
+            "normalization_method": None,
         }
+        
+        # Embed normalization stats if dataset is available
+        if train_dataset is not None:
+            # Assumes dataset has a method to retrieve computed stats
+            if hasattr(train_dataset, "get_normalization_stats"):
+                norm_stats = train_dataset.get_normalization_stats()
+                if norm_stats is not None:
+                    checkpoint["normalization_stats"] = norm_stats
+                    
+                    # Retrieve method from config or default to 'zscore'
+                    train_conf = self.config.get("training", {})
+                    checkpoint["normalization_method"] = train_conf.get("normalization_method", "zscore")
+                    
+                    logger.debug(f"Embedded normalization stats ({checkpoint['normalization_method']}) into checkpoint.")
 
         torch.save(checkpoint, checkpoint_path)
         logger.debug(f"Checkpoint saved: {checkpoint_path}")
@@ -291,6 +309,9 @@ class UrbanAITrainer:
             "optimizer": "adam",
             "gradient_clip": 1.0,
             "num_workers": 4,
+            "training": {
+                "normalization_method": "zscore"
+            },
             "model": {
                 "input_channels": 7,
                 "hidden_dims": [64, 128, 256, 256, 128, 64],
