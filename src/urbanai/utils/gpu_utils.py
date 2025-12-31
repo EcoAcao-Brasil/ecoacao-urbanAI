@@ -2,7 +2,9 @@
 
 import torch
 from typing import Optional
+import logging
 
+logger = logging.getLogger(__name__)
 
 def get_device(device: Optional[str] = None) -> torch.device:
     """
@@ -19,18 +21,18 @@ def get_device(device: Optional[str] = None) -> torch.device:
     return torch.device(device)
 
 
-def print_gpu_info() -> None:
-    """Print GPU information."""
+def log_gpu_info() -> None:
+    """Output GPU information."""
     if torch.cuda.is_available():
-        print(f"CUDA Available: True")
-        print(f"CUDA Version: {torch.version.cuda}")
-        print(f"GPU Count: {torch.cuda.device_count()}")
+        logger.info(f"CUDA Available: True")
+        logger.info(f"CUDA Version: {torch.version.cuda}")
+        logger.info(f"GPU Count: {torch.cuda.device_count()}")
 
         for i in range(torch.cuda.device_count()):
-            print(f"\nGPU {i}: {torch.cuda.get_device_name(i)}")
-            print(f"  Memory: {torch.cuda.get_device_properties(i).total_memory / 1e9:.2f} GB")
+            logger.info(f"\nGPU {i}: {torch.cuda.get_device_name(i)}")
+            logger.info(f"  Memory: {torch.cuda.get_device_properties(i).total_memory / 1e9:.2f} GB")
     else:
-        print("CUDA Available: False")
+        logger.info("CUDA Available: False")
 
 
 def clear_gpu_memory() -> None:
