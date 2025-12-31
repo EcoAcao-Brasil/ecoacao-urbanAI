@@ -1,20 +1,18 @@
-# UrbanAI Default Configuration
-# 
-# This configuration file provides default parameters for the UrbanAI framework.
-# All year-related parameters should be adjusted based on your specific dataset.
+# configs/complete_config.yaml
+# UrbanAI Complete Configuration
+# All configurable parameters for full control over the pipeline
 
 preprocessing:
   # Temporal parameters
-  # IMPORTANT: Adjust these years based on your available Landsat data
   start_year: 1985
-  end_year: 2025  # Change this to your most recent data year
-  interval: 2  # biennial intervals
+  end_year: 2023
+  interval: 2  # 1 for annual, 2 for biennial
+  season: "07-01_12-31"
   
-  # Landsat version (5, 7, 8, or 9)
-  # The framework automatically handles different Landsat versions
+  # Landsat configuration
   landsat_version: 8
   
-  # Tocantins Framework parameters for thermal anomaly detection
+  # Tocantins Framework parameters
   tocantins:
     enabled: true
     k_threshold: 1.5
@@ -31,9 +29,9 @@ preprocessing:
       random_state: 42
 
 model:
-  # ConvLSTM architecture parameters
+  # Architecture
   architecture: convlstm
-  input_channels: 7  # NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
+  input_channels: 7
   output_channels: 7
   hidden_dims: [64, 128, 256, 256, 128, 64]
   kernel_size: 3
@@ -42,65 +40,155 @@ model:
   bias: true
 
 training:
-  # Training parameters
+  # Training hyperparameters
   epochs: 100
   batch_size: 8
   learning_rate: 0.001
-  optimizer: adam
-  loss: mse
+  optimizer: adam  # adam, adamw, sgd
   
-  # Data parameters
-  # sequence_length: number of historical timesteps to use for prediction
-  # This should be adjusted based on your temporal resolution and data availability
+  # Data split configuration
+  train_val_split:
+    method: temporal  # temporal, random, or manual
+    train_ratio: 0.8  # For temporal/random split
+    # For manual split, specify years:
+    # train_years: [1985, 1987, ..., 2015]
+    # val_years: [2017, 2019, ..., 2023]
+  
+  # Sequence parameters
   sequence_length: 10
-  prediction_horizon: 1  # Number of future steps to predict
+  prediction_horizon: 1
+  
+  # Normalization
   normalize: true
-  augment_train: true
+  normalization_method: zscore  # zscore, minmax, robust
+  
+  # Data augmentation
+  augmentation:
+    enabled: true
+    horizontal_flip_prob: 0.5
+    vertical_flip_prob: 0.5
+    rotation_prob: 0.5
+    rotation_angles: [90, 180, 270]  # Degrees for random rotation
+    noise_prob: 0.0  # Probability of adding Gaussian noise
+    noise_std: 0.01  # Standard deviation of noise
   
   # Optimization
   gradient_clip: 1.0
-  num_workers: 4
+  weight_decay: 0.0
+  
+  # Learning rate scheduling
+  lr_scheduler:
+    enabled: false
+    type: step  # step, cosine, plateau
+    step_size: 30  # For StepLR
+    gamma: 0.1  # For StepLR
+    patience: 10  # For ReduceLROnPlateau
+    factor: 0.5  # For ReduceLROnPlateau
   
   # Early stopping
   early_stopping:
+    enabled: true
     patience: 15
     min_delta: 0.0001
+    monitor: val_loss  # val_loss, val_mae, val_rmse
   
   # Checkpointing
-  save_every: 10
+  checkpointing:
+    save_best: true
+    save_last: true
+    save_every_n_epochs: 10
+    keep_n_checkpoints: 3  # Keep only N best checkpoints
+  
+  # Data loading
+  num_workers: 4
+  pin_memory: true
+  cache_in_memory: false  # Cache all data in RAM (faster but memory-intensive)
 
 prediction:
   # Prediction parameters
-  # target_year: Specify the year you want to predict (must be > end_year)
-  # Example: If end_year is 2023, you might set target_year to 2030
   calculate_uncertainty: false
-  mc_samples: 10  # for Monte Carlo uncertainty estimation
+  uncertainty_method: mc_dropout  # mc_dropout, ensemble
+  mc_samples: 10  # Number of Monte Carlo samples
+  
+  # Output configuration
+  save_intermediate: false
+  output_format: geotiff  # geotiff, netcdf
+  compression: lzw
 
 analysis:
-  # Intervention analysis parameters
-  threshold: high  # low, medium, high - determines priority zone sensitivity
+  # Intervention analysis
+  threshold: high  # low, medium, high, or custom value (0.0-1.0)
+  threshold_values:
+    low: 0.3
+    medium: 0.5
+    high: 0.7
+  
   min_area_pixels: 10
+  min_area_m2: 900  # Minimum area in square meters (for 30m pixels)
+  
+  # Priority scoring
+  priority_weights:
+    LST: 0.4  # Land Surface Temperature
+    IS: 0.3   # Impact Score
+    SS: 0.2   # Severity Score
+    NDBI: 0.1 # Built-up Index
+  
+  # Output options
   save_geojson: true
   save_raster: true
+  save_statistics: true
 
 visualization:
   # Visualization parameters
+  enabled: true
   dpi: 300
-  cmap: RdYlBu_r  # colormap for heat visualization
-  generate_maps: true
+  figure_size: [12, 10]
+  
+  # Colormaps
+  colormaps:
+    LST: RdYlBu_r
+    NDVI: RdYlGn
+    NDBI: RdYlGn_r
+    IS: hot
+    SS: hot
+    priorities: YlOrRd
+  
+  # Map generation
+  generate_temporal_evolution: true
+  generate_prediction_maps: true
+  generate_intervention_maps: true
+  generate_comparison_maps: true
+  
+  # Plot customization
+  font_size: 11
+  title_font_size: 14
+  colorbar_label_size: 11
+  show_grid: true
+  grid_alpha: 0.3
 
-# Example usage for different scenarios:
-# 
-# Scenario 1: Historical analysis (1985-2020)
-#   start_year: 1985
-#   end_year: 2020
-#   predict for 2025 or 2030
-#
-# Scenario 2: Recent data (2015-2023)
-#   start_year: 2015
-#   end_year: 2023
-#   predict for 2030 or 2035
-#
-# Scenario 3: Custom interval (annual instead of biennial)
-#   interval: 1
-#   adjust sequence_length accordingly
+logging:
+  # Logging configuration
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  log_to_file: true
+  log_to_console: true
+  log_format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+
+device:
+  # Compute device
+  use_gpu: auto  # auto, cuda, cpu
+  gpu_id: 0  # GPU device ID if multiple GPUs available
+
+# Advanced options
+advanced:
+  # Reproducibility
+  random_seed: 42
+  deterministic: false  # Enable deterministic algorithms (slower)
+  
+  # Memory management
+  clear_cache_every_n_epochs: 5
+  mixed_precision: false  # Use automatic mixed precision (AMP)
+  
+  # Debugging
+  debug_mode: false
+  profile_performance: false
+  validate_data: true  # Validate data during loading
