@@ -1,0 +1,81 @@
+# UrbanAI Default Configuration
+
+preprocessing:
+  # Temporal parameters
+  start_year: 1985
+  end_year: 2025
+  interval: 2  # biennial
+  
+  # Landsat version (5, 7, 8, or 9)
+  landsat_version: 8
+  
+  # Tocantins Framework parameters
+  tocantins:
+    enabled: true
+    k_threshold: 1.5
+    spatial_params:
+      min_anomaly_size: 1
+      agglutination_distance: 4
+      morphology_kernel_size: 3
+      connectivity: 2
+    rf_params:
+      n_estimators: 200
+      max_depth: 25
+      min_samples_split: 8
+      min_samples_leaf: 4
+      random_state: 42
+
+model:
+  # ConvLSTM architecture
+  architecture: convlstm
+  input_channels: 7
+  output_channels: 7
+  hidden_dims: [64, 128, 256, 256, 128, 64]
+  kernel_size: 3
+  num_encoder_layers: 3
+  num_decoder_layers: 3
+  bias: true
+
+training:
+  # Training parameters
+  epochs: 100
+  batch_size: 8
+  learning_rate: 0.001
+  optimizer: adam
+  loss: mse
+  
+  # Data parameters
+  sequence_length: 10
+  prediction_horizon: 1
+  normalize: true
+  augment_train: true
+  
+  # Optimization
+  gradient_clip: 1.0
+  num_workers: 4
+  
+  # Early stopping
+  early_stopping:
+    patience: 15
+    min_delta: 0.0001
+  
+  # Checkpointing
+  save_every: 10
+
+prediction:
+  # Prediction parameters
+  calculate_uncertainty: false
+  mc_samples: 10  # for uncertainty estimation
+
+analysis:
+  # Intervention analysis
+  threshold: high  # low, medium, high
+  min_area_pixels: 10
+  save_geojson: true
+  save_raster: true
+
+visualization:
+  # Visualization parameters
+  dpi: 300
+  cmap: RdYlBu_r
+  generate_maps: true
