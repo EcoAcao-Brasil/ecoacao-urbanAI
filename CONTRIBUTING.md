@@ -278,4 +278,4 @@ Significant contributors are recognized in:
 - [AUTHORS.md](AUTHORS.md)
 - [CHANGELOG.md](CHANGELOG.md)
 
-Thank you for contributing to UrbanAI! 🌍
+Thank you for contributing to UrbanAI, by EcoAção Brasil (Brazil EcoAction).
