@@ -2,20 +2,17 @@
 Loss Functions
 
 Defines the objective functions used to optimize the UrbanAI models.
-Currently focuses on regression metrics for heat map prediction.
 """
 
 import torch
 import torch.nn as nn
 
 
-class SimpleMSELoss(nn.Module):
+class MSELoss(nn.Module):
     """
-    Wrapper around PyTorch's standard Mean Squared Error loss.
+    Mean Squared Error loss for spatiotemporal prediction.
     
-    While simple, this class structure allows us to easily swap in more complex 
-    spatial loss functions (like SSIM or Perceptual Loss) later without 
-    refactoring the training loop.
+    Simple wrapper that allows easy extension to more complex losses later.
     """
 
     def __init__(self) -> None:
@@ -28,8 +25,13 @@ class SimpleMSELoss(nn.Module):
         targets: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Computes element-wise MSE between predicted heat maps and ground truth.
+        Compute MSE between predictions and targets.
         
-        Expects tensors of shape (batch, time, channels, h, w).
+        Args:
+            predictions: (batch, time, channels, h, w)
+            targets: (batch, time, channels, h, w)
+            
+        Returns:
+            Scalar loss value
         """
         return self.mse(predictions, targets)
