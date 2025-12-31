@@ -101,9 +101,7 @@ class UrbanAIPipeline:
         Returns:
             Dictionary containing all results and output paths
         """
-        
-        logger.info("URBANAI PIPELINE EXECUTION")
-        
+        logger.info("Starting UrbanAI Pipeline execution...")
 
         results = {
             "status": "running",
@@ -114,42 +112,35 @@ class UrbanAIPipeline:
         try:
             # Step 1: Preprocessing
             if preprocess:
-                logger.info("\n[1/5] DATA PREPROCESSING")
-                logger.info("-" * 80)
+                logger.info("Step 1/5: Starting data preprocessing...")
                 processed_dir = self._run_preprocessing()
                 results["processed_data_dir"] = str(processed_dir)
 
             # Step 2: Training
             if train:
-                logger.info("\n[2/5] MODEL TRAINING")
-                logger.info("-" * 80)
+                logger.info("Step 2/5: Starting model training...")
                 model_path = self._run_training()
                 results["model_path"] = str(model_path)
 
             # Step 3: Prediction
-            logger.info(f"\n[3/5] FUTURE PREDICTION (Year {predict_year})")
-            logger.info("-" * 80)
+            logger.info(f"Step 3/5: Starting future prediction for year {predict_year}...")
             predictions = self._run_prediction(predict_year)
             results["predictions"] = predictions
 
             # Step 4: Intervention Analysis
             if analyze_interventions:
-                logger.info("\n[4/5] INTERVENTION ANALYSIS")
-                logger.info("-" * 80)
+                logger.info("Step 4/5: Starting intervention analysis...")
                 interventions = self._run_analysis(predict_year)
                 results["interventions"] = interventions
 
             # Step 5: Visualization
             if visualize:
-                logger.info("\n[5/5] VISUALIZATION")
-                logger.info("-" * 80)
+                logger.info("Step 5/5: Generating visualizations...")
                 viz_outputs = self._generate_visualizations(predict_year)
                 results["visualizations"] = viz_outputs
 
             results["status"] = "success"
-            logger.info("\n")
-            logger.info("PIPELINE COMPLETED SUCCESSFULLY")
-            
+            logger.info("Pipeline completed successfully.")
 
         except Exception as e:
             logger.error(f"Pipeline failed: {str(e)}", exc_info=True)
