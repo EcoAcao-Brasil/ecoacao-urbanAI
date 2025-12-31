@@ -1,7 +1,5 @@
 """
 UrbanAI Main Pipeline
-
-End-to-end orchestration for urban heat prediction workflow.
 """
 
 import logging
@@ -22,9 +20,9 @@ logger = logging.getLogger(__name__)
 
 class UrbanAIPipeline:
     """
-    Complete end-to-end pipeline for urban heat prediction.
+    Complete pipeline for urban heat prediction.
 
-    Orchestrates data preprocessing, model training, future prediction,
+    Operates data preprocessing, model training, future prediction,
     and intervention analysis.
 
     Args:
