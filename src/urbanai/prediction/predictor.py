@@ -5,14 +5,18 @@ Generates future urban heat predictions using trained models.
 """
 
 import logging
+import re
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import rasterio
 import torch
+import torch.nn as nn
 from tqdm import tqdm
 
+# Assumes local project structure; generic import used for demonstration
 from urbanai.models import ConvLSTMEncoderDecoder
 
 logger = logging.getLogger(__name__)
@@ -20,36 +24,47 @@ logger = logging.getLogger(__name__)
 
 class FuturePredictor:
     """
-    Predict future urban heat landscapes.
+    Predicts future urban heat landscapes using trained ConvLSTM models.
 
-    Args:
-        model_path: Path to trained model checkpoint
-        data_dir: Directory with processed features
-        output_dir: Directory for predictions
-        device: Compute device
+    Implements autoregressive prediction for multi-step forecasting and 
+    Monte Carlo Dropout for uncertainty estimation.
+
+    Attributes:
+        BAND_NAMES (List[str]): Standard ordering of spectral/heat bands.
     """
+
+    BAND_NAMES = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
 
     def __init__(
         self,
-        model_path: Path,
-        data_dir: Path,
-        output_dir: Optional[Path] = None,
+        model_path: Union[str, Path],
+        data_dir: Union[str, Path],
+        output_dir: Optional[Union[str, Path]] = None,
         device: str = "cuda",
     ) -> None:
+        """
+        Initialize the predictor.
+
+        Args:
+            model_path: Path to the .pt model checkpoint.
+            data_dir: Directory containing processed feature rasters.
+            output_dir: Directory to save results (defaults to sibling 'predictions' dir).
+            device: Compute device ('cuda', 'mps', or 'cpu').
+        """
         self.model_path = Path(model_path)
         self.data_dir = Path(data_dir)
+        
         self.output_dir = Path(output_dir) if output_dir else self.data_dir.parent / "predictions"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
 
-        # Load model
-        self.model, self.config = self._load_model()
+        # Initialization
+        self.model, self.config, self.norm_stats, self.norm_method = self._load_model()
         self.model.eval()
 
-        logger.info("FuturePredictor initialized")
-        logger.info(f"Model: {model_path.name}")
-        logger.info(f"Device: {self.device}")
+        logger.info(f"FuturePredictor ready on {self.device}")
+        logger.info(f"Normalization: {self.norm_method.upper() if self.norm_stats else 'DISABLED'}")
 
     def predict(
         self,
@@ -59,311 +74,338 @@ class FuturePredictor:
         calculate_uncertainty: bool = False,
     ) -> Dict[str, Any]:
         """
-        Predict future urban heat landscape.
+        Execute prediction pipeline from current_year to target_year.
 
         Args:
-            current_year: Most recent year in training data
-            target_year: Year to predict
-            save_outputs: Save prediction rasters
-            calculate_uncertainty: Calculate prediction uncertainty
+            current_year: The last available year of ground truth data.
+            target_year: The future year to predict.
+            save_outputs: Whether to write GeoTIFFs to disk.
+            calculate_uncertainty: Whether to estimate epistemic uncertainty.
 
         Returns:
-            Dictionary with predictions and metadata
+            Dict containing metadata, statistics, and paths to saved files.
         """
-        logger.info(f"Predicting {target_year} from {current_year}")
+        logger.info(f"Starting prediction task: {current_year} -> {target_year}")
 
-        # Calculate number of steps
+        # Validation and Setup
         year_interval = self._infer_interval()
+        if target_year <= current_year:
+            raise ValueError(f"Target year ({target_year}) must be greater than current year ({current_year})")
+        
         n_steps = (target_year - current_year) // year_interval
+        logger.info(f"Horizon: {n_steps} steps (Interval: {year_interval} years)")
 
-        if n_steps <= 0:
-            raise ValueError(f"Target year {target_year} must be after {current_year}")
-
-        logger.info(f"Prediction steps: {n_steps} (interval: {year_interval} years)")
-
-        # Load input sequence
+        # Prepare Input
         input_sequence = self._load_input_sequence(current_year)
+        
+        # Inference
+        prediction = self._predict_autoregressive(input_sequence, n_steps)
 
-        # Get metadata from last file
-        last_file = self._get_file_for_year(current_year)
-        with rasterio.open(last_file) as src:
-            metadata = src.meta.copy()
-
-        # Make prediction
-        with torch.no_grad():
-            prediction = self._predict_multi_step(input_sequence, n_steps)
-
-        # Denormalize if needed
-        if self.config.get("normalize", True):
+        # Post-processing
+        if self.norm_stats:
+            logger.info("Denormalizing predictions...")
             prediction = self._denormalize(prediction)
 
-        # Calculate uncertainty if requested
+        # Uncertainty Estimation
         uncertainty = None
         if calculate_uncertainty:
-            uncertainty = self._calculate_uncertainty(input_sequence, n_steps)
+            uncertainty = self._estimate_uncertainty(input_sequence, n_steps)
+            if self.norm_stats and uncertainty is not None:
+                uncertainty = self._denormalize_uncertainty(uncertainty)
 
-        # Save outputs
-        output_path = None
-        if save_outputs:
-            output_path = self._save_prediction(
-                prediction,
-                metadata,
-                target_year,
-                uncertainty,
-            )
-
-        # Calculate statistics
-        stats = self._calculate_prediction_stats(prediction)
-
-        results = {
+        # Output Generation
+        result_meta = {
             "target_year": target_year,
             "prediction_shape": prediction.shape,
-            "output_path": output_path,
-            "statistics": stats,
+            "statistics": self._calculate_prediction_stats(prediction),
+            "normalization_method": self.norm_method,
         }
 
-        if uncertainty is not None:
-            results["uncertainty"] = uncertainty
+        if save_outputs:
+            ref_meta = self._get_raster_metadata(current_year)
+            out_path = self._save_prediction(prediction, ref_meta, target_year, uncertainty)
+            result_meta["output_path"] = str(out_path)
 
-        logger.info(f"Prediction complete: {target_year}")
-        return results
+        logger.info(f"Prediction task complete for {target_year}")
+        return result_meta
 
-    def _load_model(self) -> tuple[torch.nn.Module, Dict]:
-        """Load trained model from checkpoint."""
-        logger.info(f"Loading model: {self.model_path}")
-
+    def _load_model(self) -> Tuple[nn.Module, Dict, Optional[Dict], str]:
+        """Load checkpoint, configuration, and normalization stats."""
+        logger.info(f"Loading checkpoint: {self.model_path.name}")
         checkpoint = torch.load(self.model_path, map_location=self.device)
 
-        # Extract config
         config = checkpoint.get("config", {})
         model_config = config.get("model", {})
+        
+        # Load Normalization Stats
+        norm_stats = checkpoint.get("normalization_stats")
+        norm_method = checkpoint.get("normalization_method", "zscore")
+        
+        if norm_stats:
+            # Ensure stats are numpy arrays for broadcasting
+            norm_stats = {
+                k: (v.cpu().numpy() if isinstance(v, torch.Tensor) else v)
+                for k, v in norm_stats.items()
+            }
+        else:
+            logger.warning("⚠️ Checkpoint lacks normalization stats. Predictions may be unscaled.")
 
-        # Build model
+        # Initialize Model
         model = ConvLSTMEncoderDecoder(
             input_channels=model_config.get("input_channels", 7),
             hidden_dims=model_config.get("hidden_dims", [64, 128, 256, 256, 128, 64]),
-            kernel_size=(model_config.get("kernel_size", 3), model_config.get("kernel_size", 3)),
+            kernel_size=model_config.get("kernel_size", 3),
             num_encoder_layers=model_config.get("num_encoder_layers", 3),
             num_decoder_layers=model_config.get("num_decoder_layers", 3),
             output_channels=model_config.get("output_channels", 7),
         )
-
-        # Load weights
+        
         model.load_state_dict(checkpoint["model_state_dict"])
         model.to(self.device)
-        model.eval()
+        return model, config, norm_stats, norm_method
 
-        logger.info("Model loaded successfully")
-        return model, config
+    def _load_input_sequence(self, end_year: int) -> torch.Tensor:
+        """Load and normalize historical sequence ending at end_year."""
+        seq_len = self.config.get("sequence_length", 10)
+        interval = self._infer_interval()
+        
+        start_year = end_year - ((seq_len - 1) * interval)
+        years = list(range(start_year, end_year + 1, interval))
 
-    def _load_input_sequence(self, current_year: int) -> torch.Tensor:
-        """Load input sequence for prediction."""
-        sequence_length = self.config.get("sequence_length", 10)
-        year_interval = self._infer_interval()
+        logger.debug(f"Loading sequence years: {years}")
 
-        # Calculate years in sequence
-        years = [
-            current_year - i * year_interval
-            for i in range(sequence_length - 1, -1, -1)
-        ]
-
-        logger.info(f"Loading sequence: {years[0]}-{years[-1]}")
-
-        # Load rasters
-        sequence_data = []
-        for year in years:
-            file_path = self._get_file_for_year(year)
-            with rasterio.open(file_path) as src:
-                data = src.read()  # (channels, h, w)
+        seq_data = []
+        for y in years:
+            path = self._find_file_for_year(y)
+            with rasterio.open(path) as src:
+                data = src.read()
+                # Sanitize input
                 data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-                sequence_data.append(data)
+                seq_data.append(data)
 
-        # Stack into sequence
-        sequence = np.stack(sequence_data, axis=0)  # (seq_len, channels, h, w)
+        # Shape: (seq_len, C, H, W)
+        sequence = np.stack(seq_data, axis=0)
 
-        # Normalize if needed
-        if self.config.get("normalize", True):
+        if self.norm_stats:
             sequence = self._normalize(sequence)
 
-        # Convert to tensor
-        tensor = torch.from_numpy(sequence).float().unsqueeze(0)  # (1, seq_len, ch, h, w)
-        tensor = tensor.to(self.device)
+        # Convert to Tensor: (1, seq_len, C, H, W)
+        tensor = torch.from_numpy(sequence).float().unsqueeze(0)
+        return tensor.to(self.device)
 
-        return tensor
-
-    def _predict_multi_step(
-        self,
-        input_sequence: torch.Tensor,
-        n_steps: int,
-    ) -> np.ndarray:
+    @torch.inference_mode()
+    def _predict_autoregressive(self, input_seq: torch.Tensor, steps: int) -> np.ndarray:
         """
-        Predict multiple steps into the future.
-
-        Args:
-            input_sequence: Input tensor (1, seq_len, channels, h, w)
-            n_steps: Number of steps to predict
-
-        Returns:
-            Predicted array (channels, h, w) for final step
+        Perform multi-step autoregressive prediction.
+        
+        Uses the output of step T as the input for step T+1.
         """
-        current_sequence = input_sequence
+        curr_seq = input_seq.clone()
+        final_pred = None
 
-        logger.info(f"Predicting {n_steps} steps...")
+        for _ in tqdm(range(steps), desc="Forecasting", leave=False):
+            # Model output shape: (1, 1, C, H, W)
+            next_step = self.model(curr_seq, future_steps=1)
+            
+            # Slide window: Drop oldest time step, append prediction
+            curr_seq = torch.cat([curr_seq[:, 1:], next_step], dim=1)
+            final_pred = next_step
 
-        for step in tqdm(range(n_steps), desc="Prediction steps"):
-            # Predict next step
-            with torch.no_grad():
-                prediction = self.model(current_sequence, future_steps=1)
+        # Return result of the final step: (C, H, W)
+        return final_pred[0, 0].cpu().numpy()
 
-            # Update sequence (remove oldest, add prediction)
-            # prediction: (1, 1, channels, h, w)
-            # current_sequence: (1, seq_len, channels, h, w)
-            current_sequence = torch.cat([
-                current_sequence[:, 1:, :, :, :],  # Remove first timestep
-                prediction,  # Add prediction
-            ], dim=1)
+    def _estimate_uncertainty(
+        self, 
+        input_seq: torch.Tensor, 
+        steps: int, 
+        mc_samples: int = 20
+    ) -> Optional[np.ndarray]:
+        """Estimate uncertainty using Monte Carlo Dropout."""
+        logger.info(f"Calculating uncertainty ({mc_samples} MC samples)...")
+        
+        preds = []
+        
+        # Context manager to enable dropout during inference
+        with self._enable_dropout():
+            try:
+                for _ in tqdm(range(mc_samples), desc="MC Sampling", leave=False):
+                    # We cannot use inference_mode here because we need randomness
+                    with torch.no_grad():
+                        pred_seq = input_seq.clone()
+                        for _ in range(steps):
+                            next_step = self.model(pred_seq, future_steps=1)
+                            pred_seq = torch.cat([pred_seq[:, 1:], next_step], dim=1)
+                        
+                        preds.append(pred_seq[0, -1].cpu().numpy())
+                
+                stack = np.stack(preds, axis=0)  # (samples, C, H, W)
+                std_dev = np.std(stack, axis=0)  # (C, H, W)
+                return np.mean(std_dev, axis=0)  # Average across channels -> (H, W)
 
-        # Get final prediction
-        final_prediction = prediction[0, 0].cpu().numpy()  # (channels, h, w)
+            except Exception as e:
+                logger.error(f"Uncertainty calculation failed: {e}")
+                return None
 
-        return final_prediction
-
-    def _calculate_uncertainty(
-        self,
-        input_sequence: torch.Tensor,
-        n_steps: int,
-        n_samples: int = 10,
-    ) -> np.ndarray:
-        """
-        Calculate prediction uncertainty using Monte Carlo dropout.
-
-        Args:
-            input_sequence: Input sequence
-            n_steps: Number of prediction steps
-            n_samples: Number of MC samples
-
-        Returns:
-            Uncertainty map (h, w)
-        """
-        logger.info("Calculating uncertainty...")
-
-        # Enable dropout for MC sampling
+    @contextmanager
+    def _enable_dropout(self):
+        """Context manager to enable Dropout layers while keeping Batch Norm frozen."""
+        # Save original state
+        original_mode = self.model.training
+        
+        # Set to train to enable dropout
         self.model.train()
-
-        predictions = []
-        for _ in tqdm(range(n_samples), desc="MC samples"):
-            pred = self._predict_multi_step(input_sequence.clone(), n_steps)
-            predictions.append(pred)
-
-        predictions = np.stack(predictions, axis=0)  # (n_samples, channels, h, w)
-
-        # Calculate uncertainty as standard deviation
-        uncertainty = np.std(predictions, axis=0)  # (channels, h, w)
-
-        # Average across channels
-        uncertainty_map = np.mean(uncertainty, axis=0)  # (h, w)
-
-        self.model.eval()
-
-        return uncertainty_map
-
-    def _save_prediction(
-        self,
-        prediction: np.ndarray,
-        metadata: Dict,
-        year: int,
-        uncertainty: Optional[np.ndarray] = None,
-    ) -> Path:
-        """Save prediction to GeoTIFF."""
-        # Update metadata
-        meta = metadata.copy()
-        meta.update({
-            "count": prediction.shape[0],
-            "dtype": "float32",
-        })
-
-        # Save prediction
-        output_path = self.output_dir / f"{year}_predicted.tif"
-        with rasterio.open(output_path, "w", **meta) as dst:
-            dst.write(prediction.astype(np.float32))
-            # Set band descriptions
-            descriptions = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
-            for i, desc in enumerate(descriptions, start=1):
-                dst.set_band_description(i, desc)
-
-        logger.info(f"Saved prediction: {output_path}")
-
-        # Save uncertainty if available
-        if uncertainty is not None:
-            uncertainty_path = self.output_dir / f"{year}_uncertainty.tif"
-            meta_unc = meta.copy()
-            meta_unc["count"] = 1
-
-            with rasterio.open(uncertainty_path, "w", **meta_unc) as dst:
-                dst.write(uncertainty.astype(np.float32), 1)
-
-            logger.info(f"Saved uncertainty: {uncertainty_path}")
-
-        return output_path
-
-    def _get_file_for_year(self, year: int) -> Path:
-        """Get file path for specific year."""
-        # Try complete features first
-        pattern = f"{year}_features_complete.tif"
-        files = list(self.data_dir.glob(pattern))
-
-        if not files:
-            # Try regular features
-            pattern = f"{year}_features.tif"
-            files = list(self.data_dir.glob(pattern))
-
-        if not files:
-            raise FileNotFoundError(f"No file found for year {year}")
-
-        return files[0]
-
-    def _infer_interval(self) -> int:
-        """Infer year interval from available files."""
-        files = sorted(self.data_dir.glob("*_features*.tif"))
-        years = sorted([self._extract_year(f.name) for f in files])
-
-        if len(years) < 2:
-            return 2  # Default to biennial
-
-        intervals = [years[i+1] - years[i] for i in range(len(years)-1)]
-        return min(intervals)  # Use minimum interval
+        
+        # Optional: Freeze BatchNorm layers to prevent stats update during inference
+        # This is strictly more correct for MC Dropout than just .train()
+        for m in self.model.modules():
+            if isinstance(m, (nn.BatchNorm2d, nn.BatchNorm3d)):
+                m.eval()
+                
+        try:
+            yield
+        finally:
+            self.model.train(original_mode)
 
     def _normalize(self, data: np.ndarray) -> np.ndarray:
-        """Normalize data (placeholder - should use training stats)."""
-        # TODO: Load normalization stats from training
+        """Apply normalization with automatic broadcasting."""
+        if not self.norm_stats:
+            return data
+
+        # Prepare shapes for broadcasting: (C, 1, 1) or (1, C, 1, 1)
+        shape_suffix = (1, 1) if data.ndim == 3 else (1, 1, 1)
+        
+        stats = self._get_reshaped_stats(shape_suffix)
+        
+        if self.norm_method == "zscore":
+            return (data - stats["mean"]) / stats["std"]
+        elif self.norm_method == "minmax":
+            return (data - stats["min"]) / stats["range"]
+        elif self.norm_method == "robust":
+            return (data - stats["median"]) / stats["iqr"]
         return data
 
     def _denormalize(self, data: np.ndarray) -> np.ndarray:
-        """Denormalize data (placeholder)."""
-        # TODO: Load normalization stats from training
+        """Reverse normalization."""
+        if not self.norm_stats:
+            return data
+
+        shape_suffix = (1, 1) if data.ndim == 3 else (1, 1, 1)
+        stats = self._get_reshaped_stats(shape_suffix)
+
+        if self.norm_method == "zscore":
+            return (data * stats["std"]) + stats["mean"]
+        elif self.norm_method == "minmax":
+            return (data * stats["range"]) + stats["min"]
+        elif self.norm_method == "robust":
+            return (data * stats["iqr"]) + stats["median"]
         return data
 
-    def _calculate_prediction_stats(self, prediction: np.ndarray) -> Dict:
-        """Calculate prediction statistics."""
-        band_names = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
+    def _denormalize_uncertainty(self, uncertainty: np.ndarray) -> np.ndarray:
+        """Scale uncertainty map (Standard Deviation) back to original units."""
+        # For std dev, we only scale by the multiplicative factor (Std, Range, IQR)
+        # We do NOT add the mean/min/median.
+        
+        # Average the scaling factor across channels since uncertainty is flattened to (H, W)
+        if self.norm_method == "zscore":
+            scale = np.mean(self.norm_stats["std"])
+        elif self.norm_method == "minmax":
+            scale = np.mean(self.norm_stats["range"])
+        elif self.norm_method == "robust":
+            scale = np.mean(self.norm_stats["iqr"])
+        else:
+            scale = 1.0
+            
+        return uncertainty * scale
 
+    def _get_reshaped_stats(self, suffix_shape: Tuple) -> Dict[str, np.ndarray]:
+        """Helper to reshape stats for broadcasting."""
+        reshaped = {}
+        for k, v in self.norm_stats.items():
+            # Add dimensions to the right: (C,) -> (C, 1, 1)
+            target_shape = v.shape + suffix_shape
+            reshaped[k] = v.reshape(target_shape)
+            
+            # If input is 4D (Time, C, H, W), we need (1, C, H, W) alignment
+            if len(suffix_shape) == 3: 
+                reshaped[k] = reshaped[k][None, ...] 
+        return reshaped
+
+    def _save_prediction(
+        self, 
+        pred: np.ndarray, 
+        meta: Dict, 
+        year: int, 
+        uncertainty: Optional[np.ndarray]
+    ) -> Path:
+        """Write prediction and optional uncertainty to GeoTIFF."""
+        meta.update({"count": pred.shape[0], "dtype": "float32"})
+        
+        out_path = self.output_dir / f"{year}_predicted.tif"
+        
+        # Save Prediction
+        with rasterio.open(out_path, "w", **meta) as dst:
+            dst.write(pred.astype(np.float32))
+            for i, name in enumerate(self.BAND_NAMES, start=1):
+                dst.set_band_description(i, name)
+
+        # Save Uncertainty (if exists)
+        if uncertainty is not None:
+            unc_path = self.output_dir / f"{year}_uncertainty.tif"
+            unc_meta = meta.copy()
+            unc_meta.update({"count": 1})
+            
+            with rasterio.open(unc_path, "w", **unc_meta) as dst:
+                dst.write(uncertainty.astype(np.float32), 1)
+                dst.set_band_description(1, "Uncertainty (Std Dev)")
+        
+        logger.info(f"Saved: {out_path.name}")
+        return out_path
+
+    def _find_file_for_year(self, year: int) -> Path:
+        """Locate feature file with flexible naming convention."""
+        for pattern in [f"{year}_features_complete.tif", f"{year}_features.tif"]:
+            matches = list(self.data_dir.glob(pattern))
+            if matches:
+                return matches[0]
+        raise FileNotFoundError(f"No features found for year {year} in {self.data_dir}")
+
+    def _infer_interval(self) -> int:
+        """Determine temporal resolution of the dataset."""
+        files = sorted(self.data_dir.glob("*_features*.tif"))
+        if not files:
+            raise FileNotFoundError("No feature files found to infer interval.")
+            
+        years = sorted(list(set(self._extract_year(f.name) for f in files)))
+
+        if len(years) < 2:
+            return 2  # Default assumption if only 1 file exists
+
+        intervals = [years[i+1] - years[i] for i in range(len(years)-1)]
+        return min(intervals)
+
+    def _calculate_prediction_stats(self, prediction: np.ndarray) -> Dict[str, Dict[str, float]]:
+        """Compute basic descriptive statistics for the prediction."""
         stats = {}
-        for i, name in enumerate(band_names):
+        for i, name in enumerate(self.BAND_NAMES):
             band_data = prediction[i]
             stats[name] = {
                 "min": float(np.min(band_data)),
                 "max": float(np.max(band_data)),
                 "mean": float(np.mean(band_data)),
                 "std": float(np.std(band_data)),
+                "median": float(np.median(band_data)),
             }
-
         return stats
+
+    def _get_raster_metadata(self, year: int) -> Dict:
+        """Retrieve metadata from the source file of a specific year."""
+        path = self._find_file_for_year(year)
+        with rasterio.open(path) as src:
+            return src.meta.copy()
 
     @staticmethod
     def _extract_year(filename: str) -> int:
-        """Extract year from filename."""
-        import re
-
+        """Extract 4-digit year from filename."""
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
