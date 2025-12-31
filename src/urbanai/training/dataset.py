@@ -1,17 +1,19 @@
 """
 PyTorch Dataset for Spatiotemporal Urban Heat Data
 
-Handles loading and preprocessing of temporal raster sequences.
+Handles loading, preprocessing, and augmentation of temporal raster sequences with configurable parameters.
 """
 
 import logging
+import random
+import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import rasterio
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +26,15 @@ class UrbanHeatDataset(Dataset):
     [NDBI, NDVI, NDWI, NDBSI, LST, IS, SS]
 
     Args:
-        data_dir: Directory with processed feature rasters
-        sequence_length: Length of input sequences
-        prediction_horizon: Number of future steps to predict
-        years: List of years to include (if None, uses all available)
-        normalize: Whether to normalize features
-        augment: Whether to apply data augmentation
-        cache_in_memory: Cache all data in memory (faster but more RAM)
+        data_dir: Directory with processed feature rasters.
+        sequence_length: Length of input sequences.
+        prediction_horizon: Number of future steps to predict.
+        years: List of years to include (if None, uses all available).
+        normalize: Whether to normalize features.
+        normalization_method: Method to use ('zscore', 'minmax', 'robust').
+        augment: Whether to apply data augmentation.
+        augment_config: Configuration dictionary for augmentation parameters.
+        cache_in_memory: Cache all data in memory (faster but requires high RAM).
     """
 
     def __init__(
@@ -40,22 +44,26 @@ class UrbanHeatDataset(Dataset):
         prediction_horizon: int = 1,
         years: Optional[List[int]] = None,
         normalize: bool = True,
+        normalization_method: str = "zscore",
         augment: bool = False,
+        augment_config: Optional[Dict] = None,
         cache_in_memory: bool = False,
     ) -> None:
         self.data_dir = Path(data_dir)
         self.sequence_length = sequence_length
         self.prediction_horizon = prediction_horizon
         self.normalize = normalize
+        self.normalization_method = normalization_method
         self.augment = augment
+        self.augment_config = augment_config or self._default_augment_config()
         self.cache_in_memory = cache_in_memory
 
         # Find available files
         self.file_paths = self._find_files(years)
-        if len(self.file_paths) < sequence_length + prediction_horizon:
+        min_required = sequence_length + prediction_horizon
+        if len(self.file_paths) < min_required:
             raise ValueError(
-                f"Need at least {sequence_length + prediction_horizon} years, "
-                f"found {len(self.file_paths)}"
+                f"Need at least {min_required} years, found {len(self.file_paths)}"
             )
 
         # Get spatial dimensions from first file
@@ -79,7 +87,10 @@ class UrbanHeatDataset(Dataset):
             logger.info(f"Cached {len(self.cache)} rasters")
 
         logger.info(f"Dataset initialized: {len(self)} samples")
-        logger.info(f"Sequence length: {sequence_length}, Prediction horizon: {prediction_horizon}")
+        logger.info(
+            f"Seq Len: {sequence_length}, Horizon: {prediction_horizon}, "
+            f"Norm: {normalization_method}, Augment: {augment}"
+        )
 
     def __len__(self) -> int:
         """Number of available sequences."""
@@ -90,14 +101,14 @@ class UrbanHeatDataset(Dataset):
         Get a single sequence.
 
         Args:
-            idx: Sample index
+            idx: Sample index.
 
         Returns:
             Tuple of (input_sequence, target_sequence)
             - input_sequence: (seq_len, channels, height, width)
             - target_sequence: (pred_horizon, channels, height, width)
         """
-        # Get sequence of rasters
+        # Determine indices
         input_indices = list(range(idx, idx + self.sequence_length))
         target_indices = list(
             range(
@@ -106,7 +117,7 @@ class UrbanHeatDataset(Dataset):
             )
         )
 
-        # Load data
+        # Load data (from cache or disk)
         if self.cache_in_memory:
             input_data = [self.cache[i] for i in input_indices]
             target_data = [self.cache[i] for i in target_indices]
@@ -115,8 +126,8 @@ class UrbanHeatDataset(Dataset):
             target_data = [self._load_raster(self.file_paths[i]) for i in target_indices]
 
         # Stack into sequences
-        input_seq = np.stack(input_data, axis=0)  # (seq_len, channels, h, w)
-        target_seq = np.stack(target_data, axis=0)  # (pred_horizon, channels, h, w)
+        input_seq = np.stack(input_data, axis=0)  # (seq_len, C, H, W)
+        target_seq = np.stack(target_data, axis=0)  # (pred_horizon, C, H, W)
 
         # Normalize
         if self.normalize:
@@ -135,13 +146,10 @@ class UrbanHeatDataset(Dataset):
 
     def _find_files(self, years: Optional[List[int]]) -> List[Path]:
         """Find and sort feature raster files."""
-        pattern = "*_features_complete.tif"
-        files = sorted(self.data_dir.glob(pattern))
-
+        # Try primary naming pattern, then fallback
+        files = sorted(self.data_dir.glob("*_features_complete.tif"))
         if not files:
-            # Try alternative pattern
-            pattern = "*_features.tif"
-            files = sorted(self.data_dir.glob(pattern))
+            files = sorted(self.data_dir.glob("*_features.tif"))
 
         if not files:
             raise ValueError(f"No feature files found in {self.data_dir}")
@@ -152,8 +160,6 @@ class UrbanHeatDataset(Dataset):
 
         # Sort by year
         files = sorted(files, key=lambda f: self._extract_year(f.name))
-
-        logger.info(f"Found {len(files)} raster files")
         return files
 
     def _load_raster(self, path: Path) -> np.ndarray:
@@ -161,102 +167,115 @@ class UrbanHeatDataset(Dataset):
         Load raster file.
 
         Returns:
-            Array of shape (channels, height, width)
+            Array of shape (channels, height, width), float32.
         """
         with rasterio.open(path) as src:
-            data = src.read()  # (channels, height, width)
+            data = src.read()
 
-        # Handle NaN and infinite values
+        # Handle NaN/Inf
         data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
-
         return data.astype(np.float32)
 
     def _calculate_stats(self) -> Dict[str, np.ndarray]:
-        """Calculate mean and std for normalization."""
-        logger.info("Calculating normalization statistics...")
+        """Calculate statistics for the selected normalization method."""
+        logger.info(f"Calculating {self.normalization_method} statistics...")
 
         all_data = []
         for path in self.file_paths:
             data = self._load_raster(path)
-            # Reshape to (channels, -1) for easier computation
-            data_flat = data.reshape(data.shape[0], -1)
-            all_data.append(data_flat)
+            # Reshape to (channels, -1)
+            all_data.append(data.reshape(data.shape[0], -1))
 
-        # Concatenate all data
-        all_data = np.concatenate(all_data, axis=1)  # (channels, total_pixels)
+        # Concatenate all pixels
+        all_data = np.concatenate(all_data, axis=1)
 
-        # Calculate per-channel statistics
-        mean = np.mean(all_data, axis=1, keepdims=True)  # (channels, 1)
-        std = np.std(all_data, axis=1, keepdims=True)  # (channels, 1)
+        stats = {}
+        if self.normalization_method == "zscore":
+            mean = np.mean(all_data, axis=1, keepdims=True)
+            std = np.std(all_data, axis=1, keepdims=True)
+            stats = {"mean": mean, "std": np.where(std < 1e-8, 1.0, std)}
 
-        # Avoid division by zero
-        std = np.where(std < 1e-8, 1.0, std)
+        elif self.normalization_method == "minmax":
+            min_vals = np.min(all_data, axis=1, keepdims=True)
+            max_vals = np.max(all_data, axis=1, keepdims=True)
+            rng = max_vals - min_vals
+            stats = {"min": min_vals, "range": np.where(rng < 1e-8, 1.0, rng)}
 
-        logger.info("Normalization stats calculated")
-        logger.info(f"Mean: {mean.squeeze()}")
-        logger.info(f"Std: {std.squeeze()}")
+        elif self.normalization_method == "robust":
+            median = np.median(all_data, axis=1, keepdims=True)
+            q75 = np.percentile(all_data, 75, axis=1, keepdims=True)
+            q25 = np.percentile(all_data, 25, axis=1, keepdims=True)
+            iqr = q75 - q25
+            stats = {"median": median, "iqr": np.where(iqr < 1e-8, 1.0, iqr)}
 
-        return {"mean": mean, "std": std}
+        else:
+            raise ValueError(f"Unknown normalization method: {self.normalization_method}")
+
+        logger.info("Normalization statistics calculated.")
+        return stats
 
     def _normalize(self, data: np.ndarray) -> np.ndarray:
-        """
-        Normalize data using calculated statistics.
-
-        Args:
-            data: Shape (time, channels, height, width)
-
-        Returns:
-            Normalized data
-        """
+        """Apply normalization using pre-calculated statistics."""
         if self.stats is None:
             return data
 
-        mean = self.stats["mean"][:, None, None]  # (channels, 1, 1)
-        std = self.stats["std"][:, None, None]  # (channels, 1, 1)
+        if self.normalization_method == "zscore":
+            return (data - self.stats["mean"][:, None, None]) / self.stats["std"][:, None, None]
 
-        # Normalize
-        normalized = (data - mean) / std
+        if self.normalization_method == "minmax":
+            return (data - self.stats["min"][:, None, None]) / self.stats["range"][:, None, None]
 
-        return normalized
+        if self.normalization_method == "robust":
+            return (data - self.stats["median"][:, None, None]) / self.stats["iqr"][:, None, None]
+
+        return data
 
     def _augment_sequence(
-        self,
-        input_seq: np.ndarray,
-        target_seq: np.ndarray,
+        self, input_seq: np.ndarray, target_seq: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Apply data augmentation.
+        """Apply data augmentation based on configuration."""
+        cfg = self.augment_config
 
-        Args:
-            input_seq: (seq_len, channels, height, width)
-            target_seq: (pred_horizon, channels, height, width)
-
-        Returns:
-            Augmented sequences
-        """
-        # Random horizontal flip
-        if np.random.rand() > 0.5:
+        # Horizontal flip
+        if np.random.rand() < cfg["horizontal_flip_prob"]:
             input_seq = np.flip(input_seq, axis=3).copy()
             target_seq = np.flip(target_seq, axis=3).copy()
 
-        # Random vertical flip
-        if np.random.rand() > 0.5:
+        # Vertical flip
+        if np.random.rand() < cfg["vertical_flip_prob"]:
             input_seq = np.flip(input_seq, axis=2).copy()
             target_seq = np.flip(target_seq, axis=2).copy()
 
-        # Random 90-degree rotation
-        if np.random.rand() > 0.5:
-            k = np.random.randint(1, 4)
+        # Random rotation
+        if np.random.rand() < cfg["rotation_prob"]:
+            angle = np.random.choice(cfg["rotation_angles"])
+            k = angle // 90
             input_seq = np.rot90(input_seq, k=k, axes=(2, 3)).copy()
             target_seq = np.rot90(target_seq, k=k, axes=(2, 3)).copy()
+
+        # Gaussian noise
+        if np.random.rand() < cfg["noise_prob"]:
+            noise_std = cfg["noise_std"]
+            input_seq += np.random.normal(0, noise_std, input_seq.shape).astype(np.float32)
+            target_seq += np.random.normal(0, noise_std, target_seq.shape).astype(np.float32)
 
         return input_seq, target_seq
 
     @staticmethod
+    def _default_augment_config() -> Dict:
+        """Default augmentation parameters."""
+        return {
+            "horizontal_flip_prob": 0.5,
+            "vertical_flip_prob": 0.5,
+            "rotation_prob": 0.5,
+            "rotation_angles": [90, 180, 270],
+            "noise_prob": 0.0,
+            "noise_std": 0.01,
+        }
+
+    @staticmethod
     def _extract_year(filename: str) -> int:
         """Extract year from filename."""
-        import re
-
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
@@ -269,87 +288,109 @@ class UrbanHeatDataset(Dataset):
 
 def create_dataloaders(
     data_dir: Path,
-    sequence_length: int = 10,
-    prediction_horizon: int = 1,
-    train_years: Optional[List[int]] = None,
-    val_years: Optional[List[int]] = None,
-    batch_size: int = 8,
-    num_workers: int = 4,
-    normalize: bool = True,
-    augment_train: bool = True,
-    cache_in_memory: bool = False,
-) -> Tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
+    config: Dict,
+) -> Tuple[DataLoader, DataLoader]:
     """
-    Create train and validation dataloaders.
+    Create train and validation dataloaders using full configuration.
 
     Args:
-        data_dir: Directory with processed features
-        sequence_length: Length of input sequences
-        prediction_horizon: Number of steps to predict
-        train_years: Years for training (if None, auto-split)
-        val_years: Years for validation (if None, auto-split)
-        batch_size: Batch size
-        num_workers: Number of data loading workers
-        normalize: Whether to normalize
-        augment_train: Whether to augment training data
-        cache_in_memory: Cache data in memory
+        data_dir: Directory with processed features.
+        config: Complete configuration dictionary.
 
     Returns:
-        Tuple of (train_loader, val_loader)
+        Tuple of (train_loader, val_loader).
     """
-    # Auto-split if years not specified
-    if train_years is None or val_years is None:
-        all_files = sorted(data_dir.glob("*_features*.tif"))
-        all_years = sorted([
-            UrbanHeatDataset._extract_year(f.name) for f in all_files
-        ])
+    train_cfg = config.get("training", {})
+    adv_cfg = config.get("advanced", {})
+    
+    # Dataset Parameters
+    seq_len = train_cfg.get("sequence_length", 10)
+    pred_horizon = train_cfg.get("prediction_horizon", 1)
+    norm_method = train_cfg.get("normalization_method", "zscore")
+    normalize = train_cfg.get("normalize", True)
+    
+    # Loader Parameters
+    batch_size = train_cfg.get("batch_size", 8)
+    num_workers = train_cfg.get("num_workers", 4)
+    cache_mem = train_cfg.get("cache_in_memory", False)
+    pin_mem = train_cfg.get("pin_memory", True) and torch.cuda.is_available()
 
-        # Use last 20% for validation
-        split_idx = int(len(all_years) * 0.8)
+    # Split Strategy
+    split_cfg = train_cfg.get("train_val_split", {})
+    split_method = split_cfg.get("method", "temporal")
+    
+    all_files = sorted(data_dir.glob("*_features*.tif"))
+    all_years = sorted([UrbanHeatDataset._extract_year(f.name) for f in all_files])
+
+    if split_method == "manual":
+        train_years = split_cfg.get("train_years")
+        val_years = split_cfg.get("val_years")
+        if train_years is None or val_years is None:
+            raise ValueError("Manual split requires 'train_years' and 'val_years'")
+            
+    elif split_method == "random":
+        random.seed(adv_cfg.get("random_seed", 42))
+        years_shuffled = list(all_years)
+        random.shuffle(years_shuffled)
+        
+        split_idx = int(len(years_shuffled) * split_cfg.get("train_ratio", 0.8))
+        train_years = sorted(years_shuffled[:split_idx])
+        val_years = sorted(years_shuffled[split_idx:])
+        
+    else:  # "temporal" default
+        split_idx = int(len(all_years) * split_cfg.get("train_ratio", 0.8))
         train_years = all_years[:split_idx]
         val_years = all_years[split_idx:]
 
-    # Create datasets
+    logger.info(f"Split Strategy: {split_method}")
+    logger.info(f"Train Years ({len(train_years)}): {train_years}")
+    logger.info(f"Val Years ({len(val_years)}): {val_years}")
+
+    # Create Datasets
+    aug_cfg = train_cfg.get("augmentation", {})
+    should_augment = aug_cfg.get("enabled", True)
+
     train_dataset = UrbanHeatDataset(
         data_dir=data_dir,
-        sequence_length=sequence_length,
-        prediction_horizon=prediction_horizon,
+        sequence_length=seq_len,
+        prediction_horizon=pred_horizon,
         years=train_years,
         normalize=normalize,
-        augment=augment_train,
-        cache_in_memory=cache_in_memory,
+        normalization_method=norm_method,
+        augment=should_augment,
+        augment_config=aug_cfg,
+        cache_in_memory=cache_mem,
     )
 
     val_dataset = UrbanHeatDataset(
         data_dir=data_dir,
-        sequence_length=sequence_length,
-        prediction_horizon=prediction_horizon,
+        sequence_length=seq_len,
+        prediction_horizon=pred_horizon,
         years=val_years,
         normalize=normalize,
-        augment=False,
-        cache_in_memory=cache_in_memory,
+        normalization_method=norm_method,
+        augment=False,  # Never augment validation
+        cache_in_memory=cache_mem,
     )
 
-    # Create dataloaders
-    train_loader = torch.utils.data.DataLoader(
+    # Create Loaders
+    train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=pin_mem,
         drop_last=True,
     )
 
-    val_loader = torch.utils.data.DataLoader(
+    val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=pin_mem,
         drop_last=False,
     )
 
     logger.info(f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}")
-
     return train_loader, val_loader
-  
