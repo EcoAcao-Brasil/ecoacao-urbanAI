@@ -1,37 +1,24 @@
 # Contributing to UrbanAI
 
-Thank you for your interest in contributing to UrbanAI! This document provides guidelines and instructions for contributing to the project.
-
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Contribution Workflow](#contribution-workflow)
-- [Code Standards](#code-standards)
-- [Testing Guidelines](#testing-guidelines)
-- [Documentation](#documentation)
-- [Submitting Changes](#submitting-changes)
+Thank you for your interest in contributing to UrbanAI! This guide will help you get started.
 
 ## Code of Conduct
 
-This project adheres to a Code of Conduct that all contributors are expected to follow. Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing.
+Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing.
 
 ## Getting Started
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.8+
 - Git
-- GDAL (for geospatial operations)
+- GDAL
 - Basic understanding of deep learning and remote sensing
 
-### Development Environment
-
-We recommend using a virtual environment:
+### Development Setup
 
 ```bash
-# Clone the repository
+# Clone repository
 git clone https://github.com/EcoAcao-Brasil/ecoacao-urbanai.git
 cd ecoacao-urbanai
 
@@ -46,45 +33,12 @@ pip install -e ".[dev]"
 pre-commit install
 ```
 
-## Development Setup
-
-### System Dependencies
-
-#### Ubuntu/Debian
-```bash
-sudo apt-get update
-sudo apt-get install -y gdal-bin libgdal-dev python3-dev
-```
-
-#### macOS
-```bash
-brew install gdal
-```
-
-#### Windows
-Download and install GDAL from [GISInternals](https://www.gisinternals.com/)
-
-### Python Dependencies
-
-All Python dependencies are managed in `pyproject.toml`:
-
-```bash
-# Core dependencies
-pip install -e .
-
-# Development dependencies
-pip install -e ".[dev]"
-
-# Documentation dependencies
-pip install -e ".[docs]"
-```
-
 ## Contribution Workflow
 
 ### 1. Find or Create an Issue
 
-- Check existing [issues](https://github.com/EcoAcao-Brasil/ecoacao-urbanai/issues)
-- Create a new issue if needed, describing the problem or feature
+- Check [existing issues](https://github.com/EcoAcao-Brasil/ecoacao-urbanai/issues)
+- Create a new issue describing the problem or feature
 - Wait for maintainer feedback before starting major work
 
 ### 2. Fork and Branch
@@ -95,72 +49,47 @@ git clone https://github.com/YOUR_USERNAME/ecoacao-urbanai.git
 cd ecoacao-urbanai
 git remote add upstream https://github.com/EcoAcao-Brasil/ecoacao-urbanai.git
 
-# Create a feature branch
+# Create feature branch
 git checkout -b feature/your-feature-name
 ```
 
 ### 3. Make Changes
 
-- Write code following our [code standards](#code-standards)
-- Add tests for new functionality
-- Update documentation as needed
-- Commit with clear, descriptive messages
+- Write clean, documented code
+- Follow the code standards below
+- Test your changes locally
+- Commit with clear messages
 
-### 4. Test Locally
-
-```bash
-# Run linters
-black src/ tests/
-isort src/ tests/
-ruff check src/ tests/
-mypy src/
-
-# Run tests
-pytest tests/ -v --cov=urbanai
-
-# Build docs
-cd docs && make html
-```
-
-### 5. Submit Pull Request
+### 4. Submit Pull Request
 
 - Push your branch to your fork
 - Open a PR against `main` branch
-- Fill out the PR template completely
-- Wait for review and address feedback
+- Fill out the PR template
+- Wait for review
 
 ## Code Standards
 
-### Python Style Guide
+### Python Style
 
-We follow [PEP 8](https://pep8.org/) with some modifications:
+We follow [PEP 8](https://pep8.org/) with these tools:
 
-- **Line Length**: 100 characters (enforced by Black)
-- **Imports**: Sorted with isort
-- **Type Hints**: Required for all functions
-- **Docstrings**: Google style format
+- **Black**: Code formatting (line length: 100)
+- **isort**: Import sorting
+- **Ruff**: Linting
+- **mypy**: Type checking
 
-### Code Formatting
-
-We use automated formatters:
+Run formatters:
 
 ```bash
-# Format code
-black src/ tests/
-
-# Sort imports
-isort src/ tests/
-
-# Lint
-ruff check src/ tests/
-
-# Type checking
+black src/
+isort src/
+ruff check src/
 mypy src/
 ```
 
 These run automatically via pre-commit hooks.
 
-### Example Function
+### Code Example
 
 ```python
 from typing import Optional, Tuple
@@ -178,27 +107,23 @@ def calculate_residuals(
     Calculate residuals between predicted and actual values.
 
     Args:
-        predicted: Predicted values tensor of shape (batch, channels, h, w)
-        actual: Actual values tensor of shape (batch, channels, h, w)
-        normalize: Whether to normalize residuals by standard deviation
+        predicted: Predicted values (batch, channels, h, w)
+        actual: Actual values (batch, channels, h, w)
+        normalize: Whether to normalize residuals
 
     Returns:
-        Tuple of (residuals tensor, statistics dictionary)
+        Tuple of (residuals, statistics)
 
     Raises:
-        ValueError: If tensor shapes don't match
+        ValueError: If shapes don't match
 
     Example:
-        >>> predicted = torch.randn(1, 7, 256, 256)
+        >>> pred = torch.randn(1, 7, 256, 256)
         >>> actual = torch.randn(1, 7, 256, 256)
-        >>> residuals, stats = calculate_residuals(predicted, actual)
-        >>> print(stats['mean_absolute_error'])
-        0.123
+        >>> residuals, stats = calculate_residuals(pred, actual)
     """
     if predicted.shape != actual.shape:
-        raise ValueError(
-            f"Shape mismatch: predicted {predicted.shape} vs actual {actual.shape}"
-        )
+        raise ValueError(f"Shape mismatch: {predicted.shape} vs {actual.shape}")
 
     residuals = predicted - actual
 
@@ -208,7 +133,7 @@ def calculate_residuals(
 
     stats = {
         "mean_absolute_error": torch.mean(torch.abs(residuals)).item(),
-        "root_mean_square_error": torch.sqrt(torch.mean(residuals**2)).item(),
+        "rmse": torch.sqrt(torch.mean(residuals**2)).item(),
     }
 
     return residuals, stats
@@ -221,107 +146,16 @@ def calculate_residuals(
 - **Constants**: `UPPER_CASE` (e.g., `DEFAULT_BATCH_SIZE`)
 - **Private**: Prefix with `_` (e.g., `_internal_helper`)
 
-## Testing Guidelines
+### Docstrings
 
-### Test Structure
-
-```
-tests/
-├── test_preprocessing/
-│   ├── test_raster_loader.py
-│   ├── test_band_processor.py
-│   └── test_tocantins_integration.py
-├── test_models/
-│   ├── test_convlstm.py
-│   └── test_encoder_decoder.py
-├── test_training/
-│   └── test_trainer.py
-└── integration/
-    └── test_end_to_end.py
-```
-
-### Writing Tests
-
-```python
-import pytest
-import torch
-from urbanai.models import ConvLSTM
-
-
-class TestConvLSTM:
-    """Test suite for ConvLSTM model."""
-
-    @pytest.fixture
-    def model(self):
-        """Create test model."""
-        return ConvLSTM(
-            input_dim=7,
-            hidden_dims=[64, 128],
-            kernel_size=(3, 3),
-            num_layers=2,
-        )
-
-    def test_forward_pass(self, model):
-        """Test forward pass with valid input."""
-        batch_size, seq_len = 2, 10
-        x = torch.randn(batch_size, seq_len, 7, 64, 64)
-
-        outputs, states = model(x)
-
-        assert len(outputs) == 1  # Single output layer
-        assert outputs[0].shape == (batch_size, seq_len, 128, 64, 64)
-
-    def test_invalid_input_shape(self, model):
-        """Test handling of invalid input."""
-        x = torch.randn(2, 10, 5, 64, 64)  # Wrong channel count
-
-        with pytest.raises(RuntimeError):
-            model(x)
-
-    @pytest.mark.parametrize("batch_size", [1, 4, 8])
-    def test_different_batch_sizes(self, model, batch_size):
-        """Test model with different batch sizes."""
-        x = torch.randn(batch_size, 10, 7, 64, 64)
-        outputs, _ = model(x)
-        assert outputs[0].shape[0] == batch_size
-```
-
-### Test Coverage
-
-- Aim for **>80% code coverage**
-- All public APIs must be tested
-- Include edge cases and error conditions
-- Use parametrized tests for multiple scenarios
-
-### Running Tests
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run specific test file
-pytest tests/test_models/test_convlstm.py
-
-# Run with coverage
-pytest tests/ --cov=urbanai --cov-report=html
-
-# Run specific test
-pytest tests/test_models/test_convlstm.py::TestConvLSTM::test_forward_pass
-```
-
-## Documentation
-
-### Docstring Format
-
-We use Google-style docstrings:
+Use Google-style docstrings:
 
 ```python
 def function_name(param1: int, param2: str) -> bool:
     """
-    Short one-line description.
+    Short description.
 
-    Longer description with more details about what the function does,
-    how it works, and any important notes.
+    Longer description with details.
 
     Args:
         param1: Description of param1
@@ -331,19 +165,18 @@ def function_name(param1: int, param2: str) -> bool:
         Description of return value
 
     Raises:
-        ValueError: When and why this exception is raised
-        TypeError: When and why this exception is raised
-
-    Example:
-        >>> result = function_name(42, "test")
-        >>> print(result)
-        True
-
-    Note:
-        Additional notes or warnings about the function.
+        ValueError: When this is raised
     """
     pass
 ```
+
+## Documentation
+
+### Adding Examples
+
+- Add Jupyter notebooks to `examples/notebooks/`
+- Add Python scripts to `examples/scripts/`
+- Include clear comments and explanations
 
 ### Building Documentation
 
@@ -353,16 +186,7 @@ make html
 # Open _build/html/index.html
 ```
 
-### Adding Examples
-
-- Add Jupyter notebooks to `examples/notebooks/`
-- Add Python scripts to `examples/scripts/`
-- Include clear comments and explanations
-- Test all examples before committing
-
-## Submitting Changes
-
-### Commit Messages
+## Commit Messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -374,21 +198,21 @@ Follow [Conventional Commits](https://www.conventionalcommits.org/):
 <footer>
 ```
 
-Types:
+**Types:**
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
-- `style`: Code style changes (formatting, etc.)
+- `style`: Code style (formatting)
 - `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks
+- `chore`: Maintenance
 
-Examples:
+**Examples:**
+
 ```
-feat(models): add transformer-based encoder option
+feat(models): add attention mechanism to ConvLSTM
 
-Implement transformer encoder as alternative to ConvLSTM encoder
-for handling long temporal sequences more efficiently.
+Implement self-attention layer for improved long-range dependencies
+in temporal sequences.
 
 Closes #123
 ```
@@ -396,36 +220,37 @@ Closes #123
 ```
 fix(preprocessing): correct NDBI calculation for Landsat 5
 
-The SWIR1 band index was incorrect for Landsat 5, causing
-wrong NDBI values. Updated band mapping.
+The SWIR1 band index was incorrect, causing wrong NDBI values.
+Updated band mapping.
 
 Fixes #456
 ```
 
-### Pull Request Guidelines
+## Pull Request Guidelines
 
-1. **Title**: Clear, descriptive title following commit message format
-2. **Description**: 
-   - What changes were made and why
-   - Link to related issues
-   - Screenshots/outputs if applicable
-3. **Checklist**:
-   - [ ] Tests pass locally
-   - [ ] Code follows style guidelines
-   - [ ] Documentation updated
-   - [ ] CHANGELOG.md updated
-   - [ ] No breaking changes (or documented)
+### PR Title
+Clear, descriptive title following commit message format.
 
-### Review Process
+### PR Description
+- What changes were made and why
+- Link to related issues
+- Screenshots/outputs if applicable
 
-1. Automated checks must pass (CI/CD)
+### PR Checklist
+- [ ] Code follows style guidelines
+- [ ] Documentation updated
+- [ ] CHANGELOG.md updated
+- [ ] No breaking changes (or documented)
+- [ ] Runs locally without errors
+
+## Review Process
+
+1. Automated checks must pass (formatting, linting)
 2. At least one maintainer approval required
-3. All review comments must be addressed
+3. All review comments addressed
 4. Final approval merges to main
 
 ## Project Structure
-
-Understanding the codebase:
 
 ```
 src/urbanai/
@@ -448,9 +273,9 @@ src/urbanai/
 
 ## Recognition
 
-Contributors are recognized in:
+Significant contributors are recognized in:
 - GitHub contributors list
-- CHANGELOG.md for significant contributions
-- AUTHORS.md file
+- [AUTHORS.md](AUTHORS.md)
+- [CHANGELOG.md](CHANGELOG.md)
 
-Thank you for contributing to UrbanAI! Together we're building tools for a more sustainable urban future. 🌍
+Thank you for contributing to UrbanAI! 🌍
