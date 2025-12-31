@@ -12,7 +12,7 @@ from pathlib import Path
 from urbanai import __version__
 from urbanai.pipeline import UrbanAIPipeline
 
-logger = logging.getlogger(__name__)
+logger = logging.getLogger(__name__)
 
 def main() -> None:
     """Main CLI entry point."""
