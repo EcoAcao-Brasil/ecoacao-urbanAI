@@ -1,4 +1,4 @@
-# UrbanAI, by EcoAção Brasil (Brazil EcoAction).
+# UrbanAI, by EcoAção Brasil (Brazil EcoAction)
 
 **Deep learning framework for spatiotemporal urban heat prediction using ConvLSTM and satellite imagery**
 
@@ -13,10 +13,13 @@ Developed by [EcoAção Brasil](https://ecoacaobrasil.org)
 
 ## Overview
 
-UrbanAI is a comprehensive deep learning framework for assessing the evolution of the Urban Heat Island (UHI) phenomenon with an emphasis on urban climate planning. Built on ConvLSTM architecture, it analyzes historical Landsat data (1985-2025) to forecast future thermal landscapes and identify priority areas for urban climate intervention.
+UrbanAI is a comprehensive deep learning framework for assessing the evolution of the Urban Heat Island (UHI) phenomenon with an emphasis on urban climate planning. Built on ConvLSTM architecture, it analyzes historical Landsat data to forecast future thermal landscapes and identify priority areas for urban climate intervention.
+
+**Key Feature**: UrbanAI is fully modular and does not assume any specific temporal range - you define your own data years, prediction targets, and analysis periods based on your available satellite imagery.
 
 ### Key Features
 
+- **Flexible Temporal Configuration**: Works with any date range from your Landsat data (not limited to 1985-2025)
 - **Spatiotemporal Deep Learning**: ConvLSTM-based architecture for temporal pattern learning
 - **Multi-metric Prediction**: LST, NDBI, NDVI, NDWI, NDBSI, and intra-urban thermal anomaly metrics (Severity Score and Impact Score)
 - **Tocantins Integration**: Integration with the [Tocantins Framework](https://github.com/EcoAcao-Brasil/tocantins-framework) for Impact Score (IS) and Severity Score (SS) calculation
@@ -59,23 +62,33 @@ pre-commit install
 
 ## Quick Start
 
-### Basic Usage
+### Basic Usage with Custom Years
 
 ```python
 from urbanai import UrbanAIPipeline
 
-# Initialize pipeline
+# Initialize pipeline with your specific temporal range
 pipeline = UrbanAIPipeline(
     input_dir="data/raw",
     output_dir="results",
-    config="configs/default_config.yaml"
+    config={
+        "preprocessing": {
+            "start_year": 2000,  # Your earliest data year
+            "end_year": 2022,    # Your most recent data year
+            "interval": 2        # Biennial or annual (1)
+        },
+        "training": {
+            "epochs": 100,
+            "batch_size": 8
+        }
+    }
 )
 
-# Run complete workflow
+# Run complete workflow - predict any future year
 pipeline.run(
     preprocess=True,
     train=True,
-    predict_year=2030,
+    predict_year=2030,  # Any year beyond your end_year
     analyze_interventions=True
 )
 
@@ -84,39 +97,83 @@ predictions = pipeline.get_predictions()
 intervention_map = pipeline.get_intervention_priorities()
 ```
 
+### Example: Different Temporal Scenarios
+
+```python
+# Scenario 1: Long-term historical analysis (40 years)
+config_historical = {
+    "preprocessing": {
+        "start_year": 1985,
+        "end_year": 2023,
+        "interval": 2
+    }
+}
+pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_historical)
+pipeline.run(predict_year=2035)  # 12-year prediction
+
+# Scenario 2: Recent high-resolution analysis (annual data)
+config_recent = {
+    "preprocessing": {
+        "start_year": 2015,
+        "end_year": 2023,
+        "interval": 1  # Annual instead of biennial
+    },
+    "training": {
+        "sequence_length": 8  # Adjust based on your interval
+    }
+}
+pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_recent)
+pipeline.run(predict_year=2028)  # 5-year prediction
+
+# Scenario 3: Mid-term focused study
+config_midterm = {
+    "preprocessing": {
+        "start_year": 2010,
+        "end_year": 2020,
+        "interval": 2
+    }
+}
+pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_midterm)
+pipeline.run(predict_year=2025)
+```
+
 ### Step-by-Step Workflow
 
 ```python
 from urbanai import preprocessing, models, training, prediction, analysis
 
-# 1. Prepare data
+# 1. Prepare data with your specific years
 processor = preprocessing.TemporalDataProcessor(
     raw_dir="data/raw",
     output_dir="data/processed"
 )
+
+# Define YOUR years based on available Landsat data
+my_years = list(range(2000, 2023, 2))  # 2000, 2002, ..., 2022
+
 processor.process_all_years(
-    years=[1985, 1987, ..., 2023, 2025],
+    years=my_years,
     calculate_indices=True,
     calculate_tocantins=True
 )
 
-# 2. Train model
+# 2. Train model (automatically uses available years)
 trainer = training.ConvLSTMTrainer(
     data_dir="data/processed",
     model_config="configs/model_config.yaml"
 )
 trainer.train(epochs=100, batch_size=8)
 
-# 3. Predict future
+# 3. Predict any future year (must be beyond your data range)
 predictor = prediction.FuturePredictor(
     model_path="models/convlstm_best.pth",
-    input_year=2025
+    input_year=2022  # Your most recent data year
 )
 predictions_2030 = predictor.predict(target_year=2030)
 
 # 4. Analyze interventions
 analyzer = analysis.InterventionAnalyzer(
-    current_raster="data/processed/2025.tif",
+    current_raster="data/processed/2022.tif",
     predicted_raster=predictions_2030
 )
 priorities = analyzer.identify_priority_zones(
@@ -132,9 +189,9 @@ priorities = analyzer.identify_priority_zones(
 ### Data Pipeline
 
 ```
-Raw Landsat GeoTIFFs (1985-2025)
+Raw Landsat GeoTIFFs (YOUR CUSTOM DATE RANGE)
     ↓
-Temporal Organization (biennial: 1985, 1987, ..., 2025)
+Temporal Organization (configurable interval: annual, biennial, etc.)
     ↓
 Feature Calculation per pixel:
   - NDBI (Normalized Difference Built-up Index)
@@ -147,9 +204,9 @@ Feature Calculation per pixel:
     ↓
 ConvLSTM Training (spatiotemporal sequence learning)
     ↓
-Future Prediction (2030/2035)
+Future Prediction (ANY YEAR beyond your data range)
     ↓
-Residual Analysis (2030 - 2025)
+Residual Analysis (predicted - current)
     ↓
 Intervention Priority Mapping
 ```
@@ -159,7 +216,7 @@ Intervention Priority Mapping
 ```python
 ConvLSTM Encoder-Decoder:
   Input: (batch, time_steps, channels, height, width)
-  - time_steps: 20 (1985-2025, biennial)
+  - time_steps: Configurable based on your data (e.g., 10-20 timesteps)
   - channels: 7 (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
   
   Encoder:
@@ -171,7 +228,7 @@ ConvLSTM Encoder-Decoder:
     - ConvLSTM Layer 4: 256 filters
     - ConvLSTM Layer 5: 128 filters
     - ConvLSTM Layer 6: 64 filters
-    - Conv2D Output: 7 channels (predicted metrics for 2030)
+    - Conv2D Output: 7 channels (predicted metrics)
 ```
 
 ---
@@ -182,10 +239,10 @@ ConvLSTM Encoder-Decoder:
 
 ```yaml
 temporal:
-  start_year: 1985
-  end_year: 2025
-  interval: 2  # biennial
-  season: "07-01_12-31"  # July-December composite
+  start_year: 2000  # YOUR earliest data year
+  end_year: 2022    # YOUR most recent data year
+  interval: 2       # 1 for annual, 2 for biennial, etc.
+  season: "07-01_12-31"  # Seasonal composite (adjust as needed)
 
 indices:
   calculate_ndbi: true
@@ -220,6 +277,12 @@ training:
   learning_rate: 0.001
   optimizer: "adam"
   loss_function: "mse"
+  
+  # Adjust sequence_length based on your temporal resolution
+  # For biennial data with 40 years (20 timesteps): sequence_length: 10
+  # For annual data with 20 years: sequence_length: 10-15
+  sequence_length: 10
+  
   early_stopping:
     patience: 15
     min_delta: 0.0001
@@ -234,24 +297,35 @@ training:
 - **Satellite**: Landsat 5/7/8/9
 - **Collection**: Level-2, Collection 2
 - **Bands**: SR_B1-B7, ST_B10, QA_PIXEL
-- **Temporal Range**: 1985-2025 (biennial composites)
-- **Season**: July-December (dry season in Palmas, Tocantins)
+- **Temporal Range**: YOUR CUSTOM RANGE (e.g., 2000-2022, 1985-2023, etc.)
+- **Temporal Resolution**: Annual, biennial, or custom intervals
+- **Season**: Configurable (e.g., dry season, growing season)
 - **Spatial Resolution**: 30m
 - **Format**: GeoTIFF
 
 ### File Naming Convention
 
 ```
-L[5|7|8]_GeoTIFF_YYYY-07-01_YYYY-12-31_cropped.tif
+L[5|7|8|9]_GeoTIFF_YYYY-MM-DD_YYYY-MM-DD_cropped.tif
 
 Examples:
-L5_GeoTIFF_1985-07-01_1985-12-31_cropped.tif
-L8_GeoTIFF_2023-07-01_2023-12-31_cropped.tif
+L5_GeoTIFF_2000-07-01_2000-12-31_cropped.tif
+L8_GeoTIFF_2022-07-01_2022-12-31_cropped.tif
 ```
+
+### Important Notes on Temporal Configuration
+
+1. **Start and End Years**: Define these based on YOUR available Landsat data
+2. **Prediction Years**: Can be any year beyond your `end_year`
+3. **Sequence Length**: Adjust based on your temporal interval:
+   - Biennial data (40 years → 20 timesteps): use sequence_length 10-12
+   - Annual data (20 years): use sequence_length 10-15
+   - The model needs enough history to learn patterns
+4. **Validation**: The framework automatically validates year consistency
 
 ### Google Earth Engine Script
 
-Use the provided GEE script (included in repository) to export Landsat composites with cloud masking and scale factor application.
+Use the provided GEE script (included in repository) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
 
 ---
 
@@ -261,10 +335,10 @@ Use the provided GEE script (included in repository) to export Landsat composite
 
 ```
 data/processed/
-├── 1985_features.tif       # 7-band: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
-├── 1987_features.tif
+├── 2000_features.tif       # 7-band: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
+├── 2002_features.tif
 ├── ...
-└── 2025_features.tif
+└── 2022_features.tif
 ```
 
 ### Model Outputs
@@ -276,8 +350,8 @@ results/
 │   ├── convlstm_last.pth
 │   └── training_history.csv
 ├── predictions/
-│   ├── 2030_predicted.tif
-│   ├── 2030_residuals.tif  # 2030 - 2025
+│   ├── 2030_predicted.tif      # Your target year
+│   ├── 2030_residuals.tif      # change from latest data year
 │   └── uncertainty_map.tif
 └── analysis/
     ├── intervention_priorities.tif
@@ -291,64 +365,89 @@ results/
 
 ---
 
-## API Reference
-
-### Core Modules
-
-#### `urbanai.preprocessing`
-- `RasterLoader`: Load and validate GeoTIFF files
-- `BandProcessor`: Calculate spectral indices and LST
-- `TocantinsIntegration`: Compute IS and SS metrics
-- `TemporalDataProcessor`: Orchestrate temporal data preparation
-
-#### `urbanai.models`
-- `ConvLSTM`: ConvLSTM cell implementation
-- `EncoderDecoder`: Encoder-decoder architecture
-- `ModelFactory`: Model instantiation with configs
-
-#### `urbanai.training`
-- `UrbanAITrainer`: Training orchestration
-- `UrbanDataset`: PyTorch Dataset for spatiotemporal data
-- `SpatialLoss`: Custom loss functions for spatial data
-- `TrainingCallbacks`: Early stopping, checkpointing, logging
-
-#### `urbanai.prediction`
-- `FuturePredictor`: Inference engine for future forecasting
-- `EnsemblePredictor`: Multi-model ensemble predictions
-- `UncertaintyEstimator`: Prediction uncertainty quantification
-
-#### `urbanai.analysis`
-- `ResidualCalculator`: Compute temporal changes
-- `InterventionAnalyzer`: Identify priority intervention zones
-- `TrendAnalyzer`: Temporal trend analysis
-
----
-
-## Examples
-
-### Jupyter Notebooks
-
-See `examples/notebooks/` for comprehensive tutorials:
-
-1. **Data Preparation** (`01_data_preparation.ipynb`)
-2. **Model Training** (`02_model_training.ipynb`)
-3. **Future Prediction** (`03_prediction_2030.ipynb`)
-4. **Intervention Mapping** (`04_intervention_mapping.ipynb`)
-
-### Command Line Interface
+## Command Line Interface
 
 ```bash
-# Preprocess data
+# Preprocess data (automatically detects years from filenames)
 urbanai preprocess --input data/raw --output data/processed --config configs/preprocessing_config.yaml
 
-# Train model
+# Train model (uses all available processed years)
 urbanai train --data data/processed --config configs/model_config.yaml --epochs 100
 
-# Predict future
+# Predict specific future year
 urbanai predict --model models/convlstm_best.pth --year 2030 --output results/predictions
 
 # Generate intervention map
-urbanai analyze --current data/processed/2025_features.tif --predicted results/predictions/2030_predicted.tif --output results/analysis
+urbanai analyze --current data/processed/2022_features.tif --predicted results/predictions/2030_predicted.tif --output results/analysis
+```
+
+---
+
+## Validation and Error Handling
+
+UrbanAI includes comprehensive validation:
+
+```python
+# The pipeline validates:
+# 1. Target year is beyond your data range
+if target_year <= current_year:
+    raise ValueError(f"Target year must be > {current_year}")
+
+# 2. Sufficient historical data for training
+if n_years < sequence_length:
+    raise ValueError(f"Need at least {sequence_length} years of data")
+
+# 3. Consistent temporal intervals
+# Automatically detects and validates your temporal spacing
+```
+
+---
+
+## Best Practices
+
+### Temporal Configuration
+
+1. **Data Availability**: Use continuous temporal data without large gaps
+2. **Minimum History**: At least 10 timesteps recommended for robust training
+3. **Prediction Horizon**: Longer predictions (>10 years) increase uncertainty
+4. **Validation Split**: Reserve latest years for validation (automatic in framework)
+
+### Example Configurations
+
+```python
+# Good: 40 years of biennial data (20 timesteps)
+config = {
+    "preprocessing": {
+        "start_year": 1985,
+        "end_year": 2023,
+        "interval": 2
+    },
+    "training": {
+        "sequence_length": 10
+    }
+}
+
+# Good: 15 years of annual data
+config = {
+    "preprocessing": {
+        "start_year": 2008,
+        "end_year": 2022,
+        "interval": 1
+    },
+    "training": {
+        "sequence_length": 12
+    }
+}
+
+# Caution: Too few timesteps
+config = {
+    "preprocessing": {
+        "start_year": 2015,
+        "end_year": 2022,
+        "interval": 2  # Only 4 timesteps!
+    }
+}
+# This will raise a validation error
 ```
 
 ---
@@ -389,53 +488,11 @@ If you use UrbanAI in your research, please cite:
 
 We welcome contributions from the research community! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-### Development Setup
-
-```bash
-git clone https://github.com/EcoAcao-Brasil/ecoacao-urbanai
-cd ecoacao-urbanai
-pip install -e ".[dev]"
-pre-commit install
-pytest tests/
-```
-
-### Code Standards
-
-- **Style**: Black, isort
-- **Linting**: Ruff, mypy
-- **Testing**: pytest, >80% coverage
-- **Documentation**: Google-style docstrings
-
----
-
-## Roadmap
-
-- [x] Core ConvLSTM implementation
-- [x] Tocantins Framework integration
-- [ ] Multi-GPU training support
-- [ ] Transformer-based alternatives (ConvTransformer)
-- [ ] EcoAction Platform API integration
-- [ ] Real-time prediction service
-- [ ] Multi-city benchmarking dataset
-- [ ] Transfer learning for new cities
-
 ---
 
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## Acknowledgments
-
-Developed by **EcoAção Brasil** to support climate resilience research and urban planning initiatives.
-
-Special thanks to the open-source community and contributors of:
-- PyTorch
-- Rasterio
-- GDAL
-- Tocantins Framework
 
 ---
 
@@ -449,4 +506,4 @@ Special thanks to the open-source community and contributors of:
 
 ## Keywords
 
-urban heat island, deep learning, ConvLSTM, spatiotemporal prediction, remote sensing, Landsat, climate adaptation, thermal anomaly detection, urban planning, machine learning, PyTorch, geospatial analysis
+urban heat island, deep learning, ConvLSTM, spatiotemporal prediction, remote sensing, Landsat, climate adaptation, thermal anomaly detection, urban planning, machine learning, PyTorch, geospatial analysis, time series forecasting, modular framework
