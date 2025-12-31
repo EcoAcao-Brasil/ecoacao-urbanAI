@@ -87,7 +87,6 @@ class UrbanAIPipeline:
                 processed_dir = self.output_dir / "processed"
 
             # 2. Model Training
-            
             if train:
                 logger.info("Step 2/5: Training model...")
                 model_path = self._run_training()
@@ -191,13 +190,20 @@ class UrbanAIPipeline:
         predictions_dir.mkdir(exist_ok=True)
 
         processed_dir = self.output_dir / "processed"
-        files = sorted(processed_dir.glob("*_features*.tif"))
-        if not files:
+        
+        # Dynamically determine the most recent year from available data
+        current_year = self._get_most_recent_year(processed_dir)
+        
+        if current_year is None:
             raise ValueError(f"No processed files found in {processed_dir}")
         
-        # We need the most recent data year to serve as the baseline for prediction
-        years = sorted([int(re.search(r"(\d{4})", f.name).group(1)) for f in files])
-        current_year = max(years)
+        if target_year <= current_year:
+            raise ValueError(
+                f"Target year ({target_year}) must be greater than the most recent "
+                f"data year ({current_year})"
+            )
+
+        logger.info(f"Predicting from {current_year} to {target_year}")
 
         predictor = FuturePredictor(
             model_path=model_path,
@@ -219,19 +225,30 @@ class UrbanAIPipeline:
     def _run_analysis(self, target_year: int) -> Dict[str, Any]:
         """Compares current state vs. predicted state to identify priority zones."""
         processed_dir = self.output_dir / "processed"
-        files = sorted(processed_dir.glob("*_features*.tif"))
         
-        # Grab the latest actual year again to compare against the prediction
-        years = sorted([int(re.search(r"(\d{4})", f.name).group(1)) for f in files])
-        current_year = max(years)
+        # Dynamically determine the most recent year
+        current_year = self._get_most_recent_year(processed_dir)
+        
+        if current_year is None:
+            raise ValueError(f"No processed files found in {processed_dir}")
 
         current_raster = processed_dir / f"{current_year}_features_complete.tif"
+        
+        # Handle alternative naming patterns
+        if not current_raster.exists():
+            current_raster = processed_dir / f"{current_year}_features.tif"
+            
+        if not current_raster.exists():
+            raise FileNotFoundError(
+                f"Could not find raster for year {current_year} in {processed_dir}"
+            )
+        
         predicted_raster = self._predictions["output_path"]
 
         analysis_dir = self.output_dir / "analysis"
         analysis_dir.mkdir(exist_ok=True)
 
-        # 1. Calculate the 'residual' (difference between prediction and ideal state)
+        # 1. Calculate the 'residual' (difference between prediction and current state)
         residual_calc = ResidualCalculator(
             current_raster=current_raster,
             future_raster=predicted_raster,
@@ -239,7 +256,7 @@ class UrbanAIPipeline:
         )
         residuals = residual_calc.calculate_all_residuals()
 
-        # 2. Determine where interventions (green roofing, vegetation) are needed most
+        # 2. Determine where interventions are needed most
         analyzer = InterventionAnalyzer(
             residuals_path=residuals["combined_residuals"],
             current_raster=current_raster,
@@ -289,6 +306,33 @@ class UrbanAIPipeline:
         logger.info(f"Visualizations saved: {viz_dir}")
         return outputs
 
+    def _get_most_recent_year(self, data_dir: Path) -> Optional[int]:
+        """
+        Dynamically determine the most recent year from available processed files.
+        
+        Args:
+            data_dir: Directory containing processed feature files
+            
+        Returns:
+            Most recent year, or None if no files found
+        """
+        files = sorted(data_dir.glob("*_features*.tif"))
+        
+        if not files:
+            return None
+        
+        years = sorted([self._extract_year(f.name) for f in files])
+        return max(years)
+
+    @staticmethod
+    def _extract_year(filename: str) -> int:
+        """Extract year from filename."""
+        import re
+        match = re.search(r"(\d{4})", filename)
+        if match:
+            return int(match.group(1))
+        raise ValueError(f"Could not extract year from: {filename}")
+
     def get_predictions(self) -> Optional[Dict[str, Any]]:
         return self._predictions
 
@@ -313,11 +357,16 @@ class UrbanAIPipeline:
 
     @staticmethod
     def _default_config() -> Dict[str, Any]:
-        """Provides sensible defaults for standard ConvLSTM heat prediction."""
+        """
+        Provides sensible defaults for standard ConvLSTM heat prediction.
+        
+        Note: These defaults use 1985-2023 as an example range. Users should
+        update these values based on their specific data availability.
+        """
         return {
             "preprocessing": {
                 "start_year": 1985,
-                "end_year": 2025,
+                "end_year": 2023,  # Changed from 2025 to avoid assumptions
                 "interval": 2,
             },
             "training": {
