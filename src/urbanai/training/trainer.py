@@ -1,7 +1,7 @@
 """
-Training for UrbanAI
+Training Engine
 
-Handles training workflow with callbacks and logging.
+Manages the full training workflow for UrbanAI models
 """
 
 import logging
@@ -16,7 +16,6 @@ from tqdm import tqdm
 
 from urbanai.models import ConvLSTMEncoderDecoder
 from urbanai.training.dataset import create_dataloaders
-from urbanai.training.losses import SpatialMSELoss
 from urbanai.training.metrics import calculate_metrics
 
 logger = logging.getLogger(__name__)
@@ -24,13 +23,10 @@ logger = logging.getLogger(__name__)
 
 class UrbanAITrainer:
     """
-    Training for UrbanAI models.
+    Orchestrates the model training process.
 
-    Args:
-        data_dir: Directory with processed features
-        output_dir: Directory for model checkpoints and logs
-        config: Training configuration
-        device: Device to train on ('cuda' or 'cpu')
+    This class abstracts away the PyTorch boilerplate, handling device 
+    management, gradient updates, and metric tracking (TensorBoard/Console).
     """
 
     def __init__(
@@ -47,15 +43,16 @@ class UrbanAITrainer:
         self.config = config or self._default_config()
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
 
-        # Initialize model
+        # Initialize the ConvLSTM architecture
         self.model = self._build_model()
         self.model.to(self.device)
 
-        # Initialize optimizer and loss
         self.optimizer = self._build_optimizer()
-        self.criterion = self._build_criterion()
+        
+        # Standard MSE is sufficient for pixel-level temperature regression
+        self.criterion = nn.MSELoss() 
 
-        # Training state
+        # State tracking
         self.current_epoch = 0
         self.best_val_loss = float("inf")
         self.history = {
@@ -64,7 +61,6 @@ class UrbanAITrainer:
             "learning_rates": [],
         }
 
-        # Setup tensorboard
         self.writer = SummaryWriter(log_dir=self.output_dir / "tensorboard")
 
         logger.info("UrbanAI Trainer initialized")
@@ -80,26 +76,18 @@ class UrbanAITrainer:
         save_every: int = 10,
     ) -> Dict[str, Any]:
         """
-        Execute training loop.
-
-        Args:
-            epochs: Number of training epochs
-            batch_size: Batch size
-            learning_rate: Learning rate (overrides config)
-            early_stopping_patience: Patience for early stopping
-            save_every: Save checkpoint every N epochs
-
-        Returns:
-            Training history and final metrics
+        Executes the main training loop.
+        
+        Handles learning rate overrides, dataloader creation, and the 
+        early stopping logic based on validation loss.
         """
-        logger.info("Starting model training...")
+        logger.info("Starting training...")
 
-        # Update config if parameters provided
+        # Allow runtime override of LR without rebuilding the optimizer
         if learning_rate is not None:
             for param_group in self.optimizer.param_groups:
                 param_group["lr"] = learning_rate
 
-        # Create dataloaders
         train_loader, val_loader = create_dataloaders(
             data_dir=self.data_dir,
             sequence_length=self.config["sequence_length"],
@@ -110,52 +98,43 @@ class UrbanAITrainer:
             augment_train=True,
         )
 
-        # Early stopping
         patience_counter = 0
 
-        # Training loop
         for epoch in range(epochs):
             self.current_epoch = epoch
 
-            # Train epoch
+            # Run cycles
             train_loss = self._train_epoch(train_loader)
-
-            # Validate
             val_loss, val_metrics = self._validate_epoch(val_loader)
 
-            # Update history
+            # Record metrics
             self.history["train_loss"].append(train_loss)
             self.history["val_loss"].append(val_loss)
             self.history["learning_rates"].append(self.optimizer.param_groups[0]["lr"])
 
-            # Logging
             self._log_epoch(epoch, epochs, train_loss, val_loss, val_metrics)
 
-            # Save best model
+            # Checkpointing logic
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 self._save_checkpoint("best")
                 patience_counter = 0
-                logger.info(f"New best model saved (val_loss: {val_loss:.6f})")
+                logger.info(f"New best model (val_loss: {val_loss:.6f})")
             else:
                 patience_counter += 1
 
-            # Regular checkpoint
             if (epoch + 1) % save_every == 0:
                 self._save_checkpoint(f"epoch_{epoch+1}")
 
-            # Early stopping
             if patience_counter >= early_stopping_patience:
                 logger.info(f"Early stopping triggered after {epoch+1} epochs")
                 break
 
-        # Save final model
+        # Ensure we always have the final state saved
         self._save_checkpoint("last")
-
-        # Close tensorboard
         self.writer.close()
 
-        logger.info("Model training completed.")
+        logger.info("Training completed")
         logger.info(f"Best validation loss: {self.best_val_loss:.6f}")
 
         return {
@@ -165,28 +144,24 @@ class UrbanAITrainer:
         }
 
     def _train_epoch(self, train_loader: torch.utils.data.DataLoader) -> float:
-        """Train for one epoch."""
+        """Runs a single pass over the training set."""
         self.model.train()
         total_loss = 0.0
 
         pbar = tqdm(train_loader, desc=f"Epoch {self.current_epoch+1} [Train]")
 
         for batch_idx, (inputs, targets) in enumerate(pbar):
-            # Move to device
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
 
-            # Forward pass
             self.optimizer.zero_grad()
+            
+            # Predict future frames based on target horizon
             outputs = self.model(inputs, future_steps=targets.shape[1])
-
-            # Calculate loss
             loss = self.criterion(outputs, targets)
 
-            # Backward pass
             loss.backward()
 
-            # Gradient clipping
             if self.config.get("gradient_clip"):
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(),
@@ -195,7 +170,6 @@ class UrbanAITrainer:
 
             self.optimizer.step()
 
-            # Update metrics
             total_loss += loss.item()
             avg_loss = total_loss / (batch_idx + 1)
             pbar.set_postfix({"loss": f"{avg_loss:.6f}"})
@@ -206,7 +180,7 @@ class UrbanAITrainer:
         self,
         val_loader: torch.utils.data.DataLoader,
     ) -> tuple[float, Dict[str, float]]:
-        """Validate for one epoch."""
+        """Evaluates the model on the validation set without gradient tracking."""
         self.model.eval()
         total_loss = 0.0
         all_outputs = []
@@ -219,22 +193,17 @@ class UrbanAITrainer:
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
 
-                # Forward pass
                 outputs = self.model(inputs, future_steps=targets.shape[1])
-
-                # Calculate loss
                 loss = self.criterion(outputs, targets)
                 total_loss += loss.item()
 
-                # Store for metrics
+                # Accumulate for aggregate metric calculation (MAE, RMSE)
                 all_outputs.append(outputs.cpu())
                 all_targets.append(targets.cpu())
 
-                # Update progress
                 avg_loss = total_loss / (batch_idx + 1)
                 pbar.set_postfix({"loss": f"{avg_loss:.6f}"})
 
-        # Calculate metrics
         all_outputs = torch.cat(all_outputs, dim=0)
         all_targets = torch.cat(all_targets, dim=0)
         metrics = calculate_metrics(all_outputs, all_targets)
@@ -249,17 +218,15 @@ class UrbanAITrainer:
         val_loss: float,
         metrics: Dict[str, float],
     ) -> None:
-        """Log epoch results."""
-        # Console
+        """Updates both the console logger and TensorBoard."""
         logger.info(
             f"Epoch {epoch+1}/{total_epochs} | "
-            f"Train Loss: {train_loss:.6f} | "
-            f"Val Loss: {val_loss:.6f} | "
+            f"Train: {train_loss:.6f} | "
+            f"Val: {val_loss:.6f} | "
             f"MAE: {metrics['mae']:.6f} | "
             f"RMSE: {metrics['rmse']:.6f}"
         )
 
-        # Tensorboard
         self.writer.add_scalar("Loss/train", train_loss, epoch)
         self.writer.add_scalar("Loss/val", val_loss, epoch)
         self.writer.add_scalar("LR", self.optimizer.param_groups[0]["lr"], epoch)
@@ -268,7 +235,7 @@ class UrbanAITrainer:
             self.writer.add_scalar(f"Metrics/{metric_name}", metric_value, epoch)
 
     def _save_checkpoint(self, name: str) -> None:
-        """Save model checkpoint."""
+        """Serializes model state, optimizer state, and history to disk."""
         checkpoint_path = self.output_dir / f"convlstm_{name}.pth"
 
         checkpoint = {
@@ -284,7 +251,7 @@ class UrbanAITrainer:
         logger.debug(f"Checkpoint saved: {checkpoint_path}")
 
     def _build_model(self) -> nn.Module:
-        """Build model from config."""
+        """Instantiates the ConvLSTM based on the config dictionary."""
         model_config = self.config.get("model", {})
 
         model = ConvLSTMEncoderDecoder(
@@ -299,7 +266,7 @@ class UrbanAITrainer:
         return model
 
     def _build_optimizer(self) -> optim.Optimizer:
-        """Build optimizer from config."""
+        """Constructs the optimizer."""
         optimizer_name = self.config.get("optimizer", "adam").lower()
         lr = self.config.get("learning_rate", 0.001)
 
@@ -308,40 +275,20 @@ class UrbanAITrainer:
         elif optimizer_name == "adamw":
             optimizer = optim.AdamW(self.model.parameters(), lr=lr)
         elif optimizer_name == "sgd":
-            optimizer = optim.SGD(
-                self.model.parameters(),
-                lr=lr,
-                momentum=0.9,
-            )
+            optimizer = optim.SGD(self.model.parameters(), lr=lr, momentum=0.9)
         else:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
         return optimizer
 
-    def _build_criterion(self) -> nn.Module:
-        """Build loss function from config."""
-        loss_name = self.config.get("loss", "mse").lower()
-
-        if loss_name == "mse":
-            criterion = nn.MSELoss()
-        elif loss_name == "spatial_mse":
-            criterion = SpatialMSELoss()
-        elif loss_name == "mae":
-            criterion = nn.L1Loss()
-        else:
-            raise ValueError(f"Unknown loss: {loss_name}")
-
-        return criterion
-
     @staticmethod
     def _default_config() -> Dict[str, Any]:
-        """Default training configuration."""
+        """Provides sensible defaults for sequence-to-sequence heat prediction."""
         return {
             "sequence_length": 10,
             "prediction_horizon": 1,
             "learning_rate": 0.001,
             "optimizer": "adam",
-            "loss": "mse",
             "gradient_clip": 1.0,
             "num_workers": 4,
             "model": {
