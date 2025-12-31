@@ -1,15 +1,20 @@
 # UrbanAI Default Configuration
+# 
+# This configuration file provides default parameters for the UrbanAI framework.
+# All year-related parameters should be adjusted based on your specific dataset.
 
 preprocessing:
   # Temporal parameters
+  # IMPORTANT: Adjust these years based on your available Landsat data
   start_year: 1985
-  end_year: 2025
-  interval: 2  # biennial
+  end_year: 2025  # Change this to your most recent data year
+  interval: 2  # biennial intervals
   
   # Landsat version (5, 7, 8, or 9)
+  # The framework automatically handles different Landsat versions
   landsat_version: 8
   
-  # Tocantins Framework parameters
+  # Tocantins Framework parameters for thermal anomaly detection
   tocantins:
     enabled: true
     k_threshold: 1.5
@@ -26,9 +31,9 @@ preprocessing:
       random_state: 42
 
 model:
-  # ConvLSTM architecture
+  # ConvLSTM architecture parameters
   architecture: convlstm
-  input_channels: 7
+  input_channels: 7  # NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
   output_channels: 7
   hidden_dims: [64, 128, 256, 256, 128, 64]
   kernel_size: 3
@@ -45,8 +50,10 @@ training:
   loss: mse
   
   # Data parameters
+  # sequence_length: number of historical timesteps to use for prediction
+  # This should be adjusted based on your temporal resolution and data availability
   sequence_length: 10
-  prediction_horizon: 1
+  prediction_horizon: 1  # Number of future steps to predict
   normalize: true
   augment_train: true
   
@@ -64,12 +71,14 @@ training:
 
 prediction:
   # Prediction parameters
+  # target_year: Specify the year you want to predict (must be > end_year)
+  # Example: If end_year is 2023, you might set target_year to 2030
   calculate_uncertainty: false
-  mc_samples: 10  # for uncertainty estimation
+  mc_samples: 10  # for Monte Carlo uncertainty estimation
 
 analysis:
-  # Intervention analysis
-  threshold: high  # low, medium, high
+  # Intervention analysis parameters
+  threshold: high  # low, medium, high - determines priority zone sensitivity
   min_area_pixels: 10
   save_geojson: true
   save_raster: true
@@ -77,5 +86,21 @@ analysis:
 visualization:
   # Visualization parameters
   dpi: 300
-  cmap: RdYlBu_r
+  cmap: RdYlBu_r  # colormap for heat visualization
   generate_maps: true
+
+# Example usage for different scenarios:
+# 
+# Scenario 1: Historical analysis (1985-2020)
+#   start_year: 1985
+#   end_year: 2020
+#   predict for 2025 or 2030
+#
+# Scenario 2: Recent data (2015-2023)
+#   start_year: 2015
+#   end_year: 2023
+#   predict for 2030 or 2035
+#
+# Scenario 3: Custom interval (annual instead of biennial)
+#   interval: 1
+#   adjust sequence_length accordingly
