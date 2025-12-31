@@ -81,10 +81,11 @@ class UrbanHeatDataset(Dataset):
         # Cache data if requested
         self.cache: Dict[int, np.ndarray] = {}
         if cache_in_memory:
-            logger.info("Caching all data in memory...")
-            for idx, path in enumerate(self.file_paths):
-                self.cache[idx] = self._load_raster(path)
-            logger.info(f"Cached {len(self.cache)} rasters")
+            estimated_size = self._estimate_cache_size()
+            available_memory = psutil.virtual_memory().available
+            if estimated_size > available_memory * 0.7:
+                logger.warning(f"Cache would use {estimated_size/1e9:.1f}GB, disabling")
+                cache_in_memory = False
 
         logger.info(f"Dataset initialized: {len(self)} samples")
         logger.info(
