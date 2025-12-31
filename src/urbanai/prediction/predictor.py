@@ -228,15 +228,12 @@ class FuturePredictor:
         # Context manager to enable dropout during inference
         with self._enable_dropout():
             try:
-                for _ in tqdm(range(mc_samples), desc="MC Sampling", leave=False):
-                    # We cannot use inference_mode here because we need randomness
+                preds = []
+                for _ in tqdm(range(mc_samples)):
                     with torch.no_grad():
-                        pred_seq = input_seq.clone()
-                        for _ in range(steps):
-                            next_step = self.model(pred_seq, future_steps=1)
-                            pred_seq = torch.cat([pred_seq[:, 1:], next_step], dim=1)
-                        
-                        preds.append(pred_seq[0, -1].cpu().numpy())
+                        pred = self._predict_single_sample(input_seq, steps)
+                        preds.append(pred)
+                        torch.cuda.empty_cache()
                 
                 stack = np.stack(preds, axis=0)  # (samples, C, H, W)
                 std_dev = np.std(stack, axis=0)  # (C, H, W)
