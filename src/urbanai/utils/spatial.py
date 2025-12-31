@@ -4,7 +4,7 @@ import numpy as np
 import rasterio
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 from typing import Tuple
-
+from pathlib import Path
 
 def reproject_raster(
     src_path: Path,
@@ -107,5 +107,4 @@ def extract_patch(
         padded = np.zeros((raster.shape[0], patch_size, patch_size), dtype=raster.dtype)
         padded[:, :patch.shape[1], :patch.shape[2]] = patch
         return padded
-
     return patch
