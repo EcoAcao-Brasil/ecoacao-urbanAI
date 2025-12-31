@@ -107,10 +107,10 @@ def run_pipeline(args) -> None:
     results = pipeline.run(predict_year=args.predict_year)
     
     if results["status"] == "success":
-        print("\n✓ Pipeline completed successfully!")
+        print("\nPipeline completed successfully.")
         print(f"Results saved to: {args.output}")
     else:
-        print("\n✗ Pipeline failed")
+        print("\n Pipeline failed")
         sys.exit(1)
 
 
@@ -125,7 +125,7 @@ def run_preprocess(args) -> None:
     )
     
     results = processor.process_all_years()
-    print(f"\n✓ Preprocessing complete: {len(results)} years processed")
+    print(f"\n Preprocessing complete: {len(results)} years processed")
 
 
 def run_train(args) -> None:
@@ -144,7 +144,7 @@ def run_train(args) -> None:
         batch_size=args.batch_size,
     )
     
-    print(f"\n✓ Training complete")
+    print(f"\n Training complete")
     print(f"Best validation loss: {results['best_loss']:.6f}")
 
 
@@ -160,12 +160,12 @@ def run_predict(args) -> None:
     )
     
     results = predictor.predict(
-        current_year=2025,  # TODO: Make this configurable
+        current_year=2025,
         target_year=args.year,
         save_outputs=True,
     )
     
-    print(f"\n✓ Prediction complete for {args.year}")
+    print(f"\n Prediction complete for {args.year}")
     print(f"Output: {results['output_path']}")
 
 
@@ -191,7 +191,7 @@ def run_analyze(args) -> None:
     
     priorities = analyzer.identify_priority_zones(save_geojson=True)
     
-    print(f"\n✓ Analysis complete")
+    print(f"\n Analysis complete")
     print(f"Priority zones: {priorities['n_hotspot_zones']}")
     print(f"Output: {args.output}")
 
