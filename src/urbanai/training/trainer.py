@@ -1,7 +1,7 @@
 """
-Training for UrbanAI Models
+Training for UrbanAI
 
-Handles complete training workflow with callbacks and logging.
+Handles training workflow with callbacks and logging.
 """
 
 import logging
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class UrbanAITrainer:
     """
-    Training orchestrator for UrbanAI models.
+    Training for UrbanAI models.
 
     Args:
         data_dir: Directory with processed features
@@ -92,9 +92,7 @@ class UrbanAITrainer:
         Returns:
             Training history and final metrics
         """
-        logger.info("=" * 80)
-        logger.info("TRAINING START")
-        logger.info("=" * 80)
+        logger.info("Starting model training...")
 
         # Update config if parameters provided
         if learning_rate is not None:
@@ -138,7 +136,7 @@ class UrbanAITrainer:
                 self.best_val_loss = val_loss
                 self._save_checkpoint("best")
                 patience_counter = 0
-                logger.info(f"✓ New best model saved (val_loss: {val_loss:.6f})")
+                logger.info(f"New best model saved (val_loss: {val_loss:.6f})")
             else:
                 patience_counter += 1
 
@@ -157,10 +155,8 @@ class UrbanAITrainer:
         # Close tensorboard
         self.writer.close()
 
-        logger.info("=" * 80)
-        logger.info("TRAINING COMPLETE")
+        logger.info("Model training completed.")
         logger.info(f"Best validation loss: {self.best_val_loss:.6f}")
-        logger.info("=" * 80)
 
         return {
             "history": self.history,
