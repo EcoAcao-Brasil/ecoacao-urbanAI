@@ -1,0 +1,27 @@
+name: Pre-commit Checks
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  pre-commit:
+    name: Pre-commit Hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-precommit-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-precommit-
+            ${{ runner.os }}-pip-
+      
+      - uses: pre-commit/action@v3.0.1
