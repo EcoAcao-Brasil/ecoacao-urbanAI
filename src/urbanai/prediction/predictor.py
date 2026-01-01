@@ -242,7 +242,20 @@ class FuturePredictor:
             except Exception as e:
                 logger.error(f"Uncertainty calculation failed: {e}")
                 return None
-
+                
+    def _predict_single_sample(self, input_seq: torch.Tensor, steps: int) -> np.ndarray:
+        """
+        Single forward pass for MC Dropout uncertainty estimation.
+        
+        Args:
+            input_seq: Input sequence tensor
+            steps: Number of future steps
+            
+        Returns:
+            Prediction array
+        """
+        return self._predict_autoregressive(input_seq, steps)
+          
     @contextmanager
     def _enable_dropout(self):
         """Context manager to enable Dropout layers while keeping Batch Norm frozen."""
