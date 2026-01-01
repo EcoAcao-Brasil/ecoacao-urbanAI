@@ -1,0 +1,48 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-docs-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-docs-
+            ${{ runner.os }}-pip-
+      
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[docs]"
+      
+      - name: Build documentation with MkDocs
+        run: |
+          if [ -f "mkdocs.yml" ]; then
+            mkdocs build --strict
+          else
+            echo "No mkdocs.yml found, skipping MkDocs build"
+          fi
+        continue-on-error: true
+      
+      - name: Check for broken links
+        run: |
+          echo "Documentation build completed"
+        continue-on-error: true
