@@ -500,7 +500,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Email**: isaque@ecoacaobrasil.org
 - **Issues**: [GitHub Issues](https://github.com/EcoAcao-Brasil/ecoacao-urbanai/issues)
-- **Documentation**: [Read the Docs](https://ecoacao-urbanai.readthedocs.io)
 
 ---
 
