@@ -10,6 +10,8 @@ jobs:
   build-docs:
     name: Build Documentation
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -33,7 +35,11 @@ jobs:
       
       - name: Build documentation with MkDocs
         run: |
-          mkdocs build --strict
+          if [ -f "mkdocs.yml" ]; then
+            mkdocs build --strict
+          else
+            echo "No mkdocs.yml found, skipping MkDocs build"
+          fi
         continue-on-error: true
       
       - name: Check for broken links
