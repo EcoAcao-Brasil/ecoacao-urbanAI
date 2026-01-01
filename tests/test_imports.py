@@ -2,67 +2,69 @@
 Basic import tests to verify package structure.
 """
 import sys
+import pytest
 
 
-def test_urbanai_imports():
-    """Test that main urbanai package can be imported."""
-    import urbanai
+def test_urbanai_version():
+    """Test that main urbanai package has version."""
+    from urbanai import __version__
 
-    assert urbanai is not None
-    assert hasattr(urbanai, "__version__")
+    assert __version__ is not None
+    assert isinstance(__version__, str)
+    assert __version__ == "0.1.0"
 
 
-def test_models_imports():
-    """Test that models module can be imported."""
+def test_models_module_exists():
+    """Test that models module exists."""
     from urbanai import models
 
     assert models is not None
 
 
-def test_utils_imports():
-    """Test that utils module can be imported."""
+def test_utils_module_exists():
+    """Test that utils module exists."""
     from urbanai import utils
 
     assert utils is not None
 
 
-def test_training_imports():
-    """Test that training module can be imported."""
+def test_training_module_exists():
+    """Test that training module exists."""
     from urbanai import training
 
     assert training is not None
 
 
-def test_preprocessing_imports():
-    """Test that preprocessing module can be imported."""
+def test_preprocessing_module_exists():
+    """Test that preprocessing module exists."""
     from urbanai import preprocessing
 
     assert preprocessing is not None
 
 
-def test_prediction_imports():
-    """Test that prediction module can be imported."""
+def test_prediction_module_exists():
+    """Test that prediction module exists."""
     from urbanai import prediction
 
     assert prediction is not None
 
 
-def test_analysis_imports():
-    """Test that analysis module can be imported."""
+def test_analysis_module_exists():
+    """Test that analysis module exists."""
     from urbanai import analysis
 
     assert analysis is not None
 
 
-def test_io_imports():
-    """Test that io module can be imported."""
+def test_io_module_exists():
+    """Test that io module exists."""
     from urbanai import io
 
     assert io is not None
 
 
-def test_visualization_imports():
-    """Test that visualization module can be imported."""
+def test_visualization_module_exists():
+    """Test that visualization module exists."""
     from urbanai import visualization
 
     assert visualization is not None
