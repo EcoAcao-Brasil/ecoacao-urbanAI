@@ -166,13 +166,13 @@ class TocantinsIntegration:
         self,
         calculator: TocantinsFrameworkCalculator,
     ) -> np.ndarray:
-        """Extract Impact Scores from calculator."""
+        """Extracts Impact Scores from the Tocantins calculator."""
         try:
-            # Get feature set with IS
+            # Retrieve feature set containing Impact Scores
             feature_set = calculator.get_feature_set()
 
             if feature_set is None or feature_set.empty:
-                logger.warning("No features calculated, returning zero array")
+                logger.warning("Tocantins: No features calculated. Returning zero array.")
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
 
@@ -180,10 +180,10 @@ class TocantinsIntegration:
             classification_map = calculator.get_classification_map()
             height, width = classification_map.shape
 
-            # Create IS raster
+            # Initialize Impact Score raster
             is_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Fill IS values for each anomaly
+            # Map Impact Score values to spatial coordinates
             for _, row in feature_set.iterrows():
                 if "impact_score" in row and "pixels" in row:
                     pixels = row["pixels"]
@@ -193,31 +193,38 @@ class TocantinsIntegration:
                             if 0 <= y < height and 0 <= x < width:
                                 is_raster[y, x] = row["impact_score"]
 
+            # Validate population of raster values
+            if np.max(is_raster) == 0:
+                logger.warning("Tocantins: Impact Score calculation produced all zeros.")
+            else:
+                min_val = np.min(is_raster[is_raster > 0])
+                max_val = np.max(is_raster)
+                logger.info(f"Impact Scores calculated successfully. Range: [{min_val:.3f}, {max_val:.3f}]")
+
             return is_raster
 
-        except TocantinsCalculationError as e:
-            logger.error(f"Tocantins calculation failed: {e}")
-            raise
         except Exception as e:
-            logger.error(f"Unexpected error in IS extraction: {e}")
-            # Return zeros as fallback instead of crashing
+            logger.error(f"Tocantins Impact Score extraction failed: {e}")
+            logger.warning("Returning zero array for Impact Scores due to extraction failure.")
+            
+            # Attempt fallback to zero array; raise critical error if dimension retrieval fails
             try:
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
-            except:
-                raise TocantinsCalculationError(f"Critical preprocessing failure: {e}") from e
+            except Exception as critical_error:
+                raise TocantinsCalculationError(f"Critical preprocessing failure: {critical_error}") from e
 
     def _extract_severity_scores(
         self,
         calculator: TocantinsFrameworkCalculator,
     ) -> np.ndarray:
-        """Extract Severity Scores from calculator."""
+        """Extracts Severity Scores from the Tocantins calculator."""
         try:
-            # Get severity scores
+            # Retrieve severity scores dataframe
             severity_df = calculator.get_severity_scores()
 
             if severity_df is None or severity_df.empty:
-                logger.warning("No severity scores calculated, returning zero array")
+                logger.warning("Tocantins: No severity scores calculated. Returning zero array.")
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
 
@@ -225,10 +232,10 @@ class TocantinsIntegration:
             classification_map = calculator.get_classification_map()
             height, width = classification_map.shape
 
-            # Create SS raster
+            # Initialize Severity Score raster
             ss_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Fill SS values
+            # Map Severity Score values to spatial coordinates
             for _, row in severity_df.iterrows():
                 if "severity_score" in row and "core_pixels" in row:
                     pixels = row["core_pixels"]
@@ -238,17 +245,26 @@ class TocantinsIntegration:
                             if 0 <= y < height and 0 <= x < width:
                                 ss_raster[y, x] = row["severity_score"]
 
+            # Validate population of raster values
+            if np.max(ss_raster) == 0:
+                logger.warning("Tocantins: Severity Score calculation produced all zeros.")
+            else:
+                min_val = np.min(ss_raster[ss_raster > 0])
+                max_val = np.max(ss_raster)
+                logger.info(f"Severity Scores calculated successfully. Range: [{min_val:.3f}, {max_val:.3f}]")
+
             return ss_raster
 
         except Exception as e:
-            logger.error(f"Failed to extract Severity Scores: {str(e)}")
-            # Return zeros if extraction fails
+            logger.error(f"Tocantins Severity Score extraction failed: {e}")
+            logger.warning("Returning zero array for Severity Scores due to extraction failure.")
+            
+            # Attempt fallback to zero array; raise critical error if dimension retrieval fails
             try:
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
-            except:
-                # If we can't even get the classification map, raise an error
-                raise TocantinsCalculationError(f"Cannot extract severity scores: {e}") from e
+            except Exception as critical_error:
+                raise TocantinsCalculationError(f"Cannot extract severity scores: {critical_error}") from e
 
     def _calculate_statistics(
         self,
