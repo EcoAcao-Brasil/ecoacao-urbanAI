@@ -178,18 +178,18 @@ class UrbanHeatDataset(Dataset):
         return data.astype(np.float32)
 
     def _estimate_cache_size(self) -> int:
-    """
-    Estimate memory required for caching all data in bytes.
-    
-    Returns:
-        Estimated size in bytes
-    """
-    # Rough estimate: n_files * channels * height * width * 4 bytes (float32)
-    size_per_file = self.n_channels * self.height * self.width * 4
-    total_size = len(self.file_paths) * size_per_file
-    
-    logger.debug(f"Estimated cache size: {total_size / 1e9:.2f} GB")
-    return total_size
+        """
+        Estimate memory required for caching all data in bytes.
+        
+        Returns:
+            Estimated size in bytes
+        """
+        # Rough estimate: n_files * channels * height * width * 4 bytes (float32)
+        size_per_file = self.n_channels * self.height * self.width * 4
+        total_size = len(self.file_paths) * size_per_file
+        
+        logger.debug(f"Estimated cache size: {total_size / 1e9:.2f} GB")
+        return total_size
     
     def _calculate_stats(self) -> Dict[str, np.ndarray]:
         """Calculate statistics for the selected normalization method."""
