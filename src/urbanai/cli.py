@@ -70,7 +70,7 @@ def main() -> None:
     args = parser.parse_args()
     
     if not args.command:
-        parser.logger.info_help()
+        parser.print_help()
         sys.exit(1)
     
     # Setup logging
