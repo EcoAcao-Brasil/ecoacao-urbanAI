@@ -1,10 +1,11 @@
 """
 Tocantins Framework Integration
 
-Calculates Impact Score (IS) and Severity Score (SS) using Tocantins Framework.
+Calculates Impact Score (IS) and Severity Score (SS) using the Tocantins Framework.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -43,8 +44,8 @@ class TocantinsIntegration:
         self.spatial_params = spatial_params or self._default_spatial_params()
         self.rf_params = rf_params or self._default_rf_params()
 
-        logger.info("TocantinsIntegration initialized")
-        logger.info(f"k_threshold: {k_threshold}")
+        logger.info("TocantinsIntegration initialized.")
+        logger.info(f"Configuration - k_threshold: {k_threshold}")
 
     def calculate_scores(
         self,
@@ -53,7 +54,7 @@ class TocantinsIntegration:
         save_intermediate: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
-        Calculate IS and SS for a raster with spectral indices.
+        Calculates IS and SS for a raster with spectral indices.
 
         Args:
             input_path: Path to GeoTIFF with bands [NDBI, NDVI, NDWI, NDBSI, LST]
@@ -63,7 +64,7 @@ class TocantinsIntegration:
         Returns:
             Tuple of (impact_scores, severity_scores, metadata)
         """
-        logger.info(f"Calculating Tocantins scores: {input_path.name}")
+        logger.info(f"Calculating Tocantins scores for: {input_path.name}")
 
         # Setup output directory
         if output_dir:
@@ -100,7 +101,7 @@ class TocantinsIntegration:
             )
 
             if not success:
-                raise TocantinsCalculationError("Tocantins Framework calculation failed")
+                raise TocantinsCalculationError("Tocantins Framework calculation failed.")
 
             # Extract scores
             impact_scores = self._extract_impact_scores(calculator)
@@ -109,8 +110,8 @@ class TocantinsIntegration:
             # Get statistics
             stats = self._calculate_statistics(impact_scores, severity_scores)
 
-            logger.info(f"Calculated scores - IS range: [{stats['is_min']:.3f}, {stats['is_max']:.3f}]")
-            logger.info(f"                    SS range: [{stats['ss_min']:.3f}, {stats['ss_max']:.3f}]")
+            logger.info(f"Calculated scores - IS Range: [{stats['is_min']:.3f}, {stats['is_max']:.3f}]")
+            logger.info(f"                    SS Range: [{stats['ss_min']:.3f}, {stats['ss_max']:.3f}]")
 
             return impact_scores, severity_scores, stats
 
@@ -120,7 +121,7 @@ class TocantinsIntegration:
                 temp_path.unlink()
 
     def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
-        """Read bands from raster."""
+        """Reads bands from raster."""
         bands = {}
         descriptions = src.descriptions or []
 
@@ -138,7 +139,7 @@ class TocantinsIntegration:
         original_path: Path,
     ) -> Path:
         """
-        Create temporary GeoTIFF in Tocantins-compatible format.
+        Creates temporary GeoTIFF in Tocantins-compatible format.
 
         Tocantins expects: SR_B1-B7, ST_B10, and calculated indices.
         """
@@ -271,7 +272,7 @@ class TocantinsIntegration:
         is_raster: np.ndarray,
         ss_raster: np.ndarray,
     ) -> Dict:
-        """Calculate statistics for IS and SS."""
+        """Calculates statistics for IS and SS."""
         return {
             "is_min": float(np.min(is_raster)),
             "is_max": float(np.max(is_raster)),
@@ -353,13 +354,13 @@ class BatchTocantinsProcessor:
         if not input_files:
             raise ValueError(f"No files matching {pattern} in {input_dir}")
 
-        logger.info(f"Processing {len(input_files)} rasters with Tocantins Framework")
+        logger.info(f"Processing {len(input_files)} rasters with Tocantins Framework.")
 
         results = {}
         for input_path in input_files:
             year = self._extract_year(input_path.name)
 
-            logger.info(f"Processing {year}...")
+            logger.info(f"Processing year: {year}")
 
             # Calculate scores
             year_output_dir = output_dir / str(year) if save_intermediate else None
@@ -377,7 +378,7 @@ class BatchTocantinsProcessor:
                 input_path, is_raster, ss_raster, output_dir, year
             )
 
-        logger.info(f"Completed Tocantins processing for {len(results)} years")
+        logger.info(f"Completed Tocantins processing for {len(results)} years.")
         return results
 
     def _save_combined(
@@ -388,7 +389,7 @@ class BatchTocantinsProcessor:
         output_dir: Path,
         year: int,
     ) -> None:
-        """Save combined raster with all features + IS + SS."""
+        """Saves combined raster with all features + IS + SS."""
         with rasterio.open(input_path) as src:
             meta = src.meta.copy()
             existing_bands = [src.read(i) for i in range(1, src.count + 1)]
@@ -408,13 +409,11 @@ class BatchTocantinsProcessor:
                 dst.write(band.astype(np.float32), i)
                 dst.set_band_description(i, desc)
 
-        logger.info(f"Saved complete features: {output_path}")
+        logger.info(f"Saved complete features to: {output_path}")
 
     @staticmethod
     def _extract_year(filename: str) -> int:
-        """Extract year from filename."""
-        import re
-
+        """Extracts year from filename."""
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
