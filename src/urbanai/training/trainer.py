@@ -6,7 +6,7 @@ Manages the full training workflow for UrbanAI models
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
