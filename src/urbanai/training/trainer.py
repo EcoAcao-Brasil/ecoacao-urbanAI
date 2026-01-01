@@ -177,7 +177,7 @@ class UrbanAITrainer:
     def _validate_epoch(
         self,
         val_loader: DataLoader,
-    ) -> tuple[float, Dict[str, float]]:
+    ) -> Tuple[float, Dict[str, float]]:
         """Evaluates the model on the validation set without gradient tracking."""
         self.model.eval()
         total_loss = 0.0
