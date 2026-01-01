@@ -15,6 +15,11 @@ from tocantins_framework import TocantinsFrameworkCalculator
 logger = logging.getLogger(__name__)
 
 
+class TocantinsCalculationError(Exception):
+    """Exception for Tocantins calculation failures."""
+    pass
+
+
 class TocantinsIntegration:
     """
     Integration with Tocantins Framework for thermal anomaly detection.
@@ -95,7 +100,7 @@ class TocantinsIntegration:
             )
 
             if not success:
-                raise RuntimeError("Tocantins Framework calculation failed")
+                raise TocantinsCalculationError("Tocantins Framework calculation failed")
 
             # Extract scores
             impact_scores = self._extract_impact_scores(calculator)
@@ -167,7 +172,9 @@ class TocantinsIntegration:
             feature_set = calculator.get_feature_set()
 
             if feature_set is None or feature_set.empty:
-                raise ValueError("No features calculated")
+                logger.warning("No features calculated, returning zero array")
+                classification_map = calculator.get_classification_map()
+                return np.zeros_like(classification_map, dtype=np.float32)
 
             # Get spatial dimensions
             classification_map = calculator.get_classification_map()
@@ -192,8 +199,13 @@ class TocantinsIntegration:
             logger.error(f"Tocantins calculation failed: {e}")
             raise
         except Exception as e:
-            logger.critical(f"Unexpected error in IS extraction: {e}")
-            raise RuntimeError("Critical preprocessing failure") from e
+            logger.error(f"Unexpected error in IS extraction: {e}")
+            # Return zeros as fallback instead of crashing
+            try:
+                classification_map = calculator.get_classification_map()
+                return np.zeros_like(classification_map, dtype=np.float32)
+            except:
+                raise TocantinsCalculationError(f"Critical preprocessing failure: {e}") from e
 
     def _extract_severity_scores(
         self,
@@ -205,7 +217,9 @@ class TocantinsIntegration:
             severity_df = calculator.get_severity_scores()
 
             if severity_df is None or severity_df.empty:
-                raise ValueError("No severity scores calculated")
+                logger.warning("No severity scores calculated, returning zero array")
+                classification_map = calculator.get_classification_map()
+                return np.zeros_like(classification_map, dtype=np.float32)
 
             # Get spatial dimensions
             classification_map = calculator.get_classification_map()
@@ -229,8 +243,12 @@ class TocantinsIntegration:
         except Exception as e:
             logger.error(f"Failed to extract Severity Scores: {str(e)}")
             # Return zeros if extraction fails
-            classification_map = calculator.get_classification_map()
-            return np.zeros_like(classification_map, dtype=np.float32)
+            try:
+                classification_map = calculator.get_classification_map()
+                return np.zeros_like(classification_map, dtype=np.float32)
+            except:
+                # If we can't even get the classification map, raise an error
+                raise TocantinsCalculationError(f"Cannot extract severity scores: {e}") from e
 
     def _calculate_statistics(
         self,
