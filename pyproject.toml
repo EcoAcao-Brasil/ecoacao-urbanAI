@@ -82,7 +82,6 @@ colab = [
 
 [project.urls]
 Homepage = "https://github.com/EcoAcao-Brasil/ecoacao-urbanai"
-Documentation = "https://ecoacao-urbanai.readthedocs.io"
 Repository = "https://github.com/EcoAcao-Brasil/ecoacao-urbanai"
 "Bug Tracker" = "https://github.com/EcoAcao-Brasil/ecoacao-urbanai/issues"
 "Tocantins Framework" = "https://github.com/EcoAcao-Brasil/tocantins-framework"
