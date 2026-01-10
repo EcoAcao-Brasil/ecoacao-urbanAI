@@ -122,27 +122,33 @@ class BandProcessor:
     def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
         """Read required bands from raster."""
         bands = {}
-        band_names = src.descriptions or [f"Band_{i+1}" for i in range(src.count)]
-
-        for common_name, band_name in self.band_map.items():
-            if band_name in band_names:
-                band_idx = band_names.index(band_name) + 1
+        descriptions = list(src.descriptions or [])
+        
+        if not descriptions:
+            raise ValueError("Raster has no band descriptions")
+        
+        # Auto-detect Landsat version from thermal band
+        if "ST_B6" in descriptions:
+            # Landsat 5/7
+            band_map = self.BAND_MAPPING[5]
+        elif "ST_B10" in descriptions:
+            # Landsat 8/9
+            band_map = self.BAND_MAPPING[8]
+        else:
+            raise ValueError(f"Cannot detect Landsat version. Bands: {descriptions}")
+        
+        # Read bands
+        for common_name, band_name in band_map.items():
+            if band_name in descriptions:
+                band_idx = descriptions.index(band_name) + 1
                 bands[common_name] = src.read(band_idx).astype(np.float32)
-            elif band_name in [f"SR_B{i}" for i in range(1, 10)]:
-                # Try numeric extraction
-                try:
-                    band_num = int(band_name.replace("SR_B", "").replace("ST_B", ""))
-                    if band_num <= src.count:
-                        bands[common_name] = src.read(band_num).astype(np.float32)
-                except ValueError:
-                    pass
-
-        # Validate required bands present
+        
+        # Validate required bands
         required = ["red", "nir", "swir1", "thermal"]
         missing = [b for b in required if b not in bands]
         if missing:
-            raise ValueError(f"Missing required bands: {missing}")
-
+            raise ValueError(f"Missing required bands: {missing}. Available: {list(bands.keys())}")
+        
         return bands
 
     @staticmethod
