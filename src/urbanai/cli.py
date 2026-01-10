@@ -66,6 +66,7 @@ def main() -> None:
     analyze_parser.add_argument("--current", required=True, help="Current year raster")
     analyze_parser.add_argument("--predicted", required=True, help="Predicted raster")
     analyze_parser.add_argument("--output", required=True, help="Output directory")
+    analyze_parser.add_argument("--config", help="Configuration file (YAML)")
     
     args = parser.parse_args()
     
@@ -173,12 +174,23 @@ def run_predict(args) -> None:
 def run_analyze(args) -> None:
     """Run analysis only."""
     from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
+    import yaml
+    
+    # Load config if provided
+    weights = None
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                weights = config.get("analysis", {}).get("priority_weights")
     
     # Calculate residuals
     residual_calc = ResidualCalculator(
         current_raster=args.current,
         future_raster=args.predicted,
         output_dir=args.output,
+        weights=weights,
     )
     
     residuals = residual_calc.calculate_all_residuals()

@@ -24,6 +24,8 @@ class ResidualCalculator:
         current_raster: Path to current year raster
         future_raster: Path to predicted future raster
         output_dir: Directory for outputs
+        weights: Optional dictionary of band weights for combined residual.
+                 If not provided, uses defaults: LST=0.4, IS=0.3, SS=0.2, NDBI=0.1
     """
 
     def __init__(
@@ -31,15 +33,44 @@ class ResidualCalculator:
         current_raster: Path,
         future_raster: Path,
         output_dir: Optional[Path] = None,
+        weights: Optional[Dict[str, float]] = None,
     ) -> None:
         self.current_raster = Path(current_raster)
         self.future_raster = Path(future_raster)
         self.output_dir = Path(output_dir) if output_dir else Path("residuals")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Set weights with defaults
+        self.weights = weights or {
+            "LST": 0.4,
+            "IS": 0.3,
+            "SS": 0.2,
+            "NDBI": 0.1,
+        }
+        
+        # Normalize weights to sum to 1.0
+        self._normalize_weights()
+
         logger.info("ResidualCalculator initialized")
         logger.info(f"Current: {self.current_raster.name}")
         logger.info(f"Future: {self.future_raster.name}")
+        logger.info(f"Using priority weights: {self.weights}")
+
+    def _normalize_weights(self) -> None:
+        """
+        Normalize weights to sum to 1.0.
+        
+        This ensures that the combined residual is properly scaled
+        regardless of the input weights.
+        """
+        total = sum(self.weights.values())
+        if total == 0:
+            logger.warning("All weights are zero, using equal weights")
+            n = len(self.weights)
+            self.weights = {k: 1.0 / n for k in self.weights.keys()}
+        elif abs(total - 1.0) > 1e-6:
+            logger.info(f"Normalizing weights (sum={total:.3f}) to sum to 1.0")
+            self.weights = {k: v / total for k, v in self.weights.items()}
 
     def calculate_all_residuals(self) -> Dict[str, Path]:
         """
@@ -151,22 +182,22 @@ class ResidualCalculator:
         Returns:
             Combined residual array (h, w)
         """
-        # Define importance weights for each metric
-        weights = {
-            "LST": 0.4,   # Land Surface Temperature - highest priority
-            "IS": 0.3,    # Impact Score - spatial extent
-            "SS": 0.2,    # Severity Score - intensity
-            "NDBI": 0.1,  # Built-up index
-        }
-
         combined = np.zeros_like(residuals[0])
 
         for i, name in enumerate(band_names):
-            weight = weights.get(name, 0.0)
+            weight = self.weights.get(name, 0.0)
             if weight > 0:
                 # Normalize to [-1, 1] range before combining
                 normalized = self._normalize_residual(residuals[i])
                 combined += weight * normalized
+            elif name in self.weights:
+                # Log if weight is zero but band is in weights dict
+                logger.debug(f"Skipping band {name} with zero weight")
+
+        # Warn about unknown bands that have data but no weights
+        unknown_bands = [name for name in band_names if name not in self.weights and name]
+        if unknown_bands:
+            logger.warning(f"Unknown bands in data (not weighted): {unknown_bands}")
 
         logger.info(f"Combined residual range: [{combined.min():.3f}, {combined.max():.3f}]")
         return combined
