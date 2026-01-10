@@ -10,7 +10,7 @@ from urbanai.utils.spatial import (
 from urbanai.utils.gpu_utils import (
     clear_gpu_memory,
     get_device,
-    print_gpu_info,
+    log_gpu_info,
 )
 from urbanai.utils.validation import validate_raster_files
 
@@ -21,7 +21,7 @@ __all__ = [
     "calculate_pixel_area",
     "extract_patch",
     "get_device",
-    "print_gpu_info",
+    "log_gpu_info",
     "clear_gpu_memory",
     "validate_raster_files",
 ]
