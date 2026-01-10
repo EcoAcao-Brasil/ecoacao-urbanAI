@@ -176,14 +176,17 @@ Raw Landsat GeoTIFFs (YOUR CUSTOM DATE RANGE)
     ↓
 Temporal Organization (configurable interval: annual, biennial, etc.)
     ↓
-Feature Calculation per pixel:
-  - NDBI (Normalized Difference Built-up Index)
-  - NDVI (Normalized Difference Vegetation Index)
-  - NDWI (Normalized Difference Water Index)
-  - NDBSI (Normalized Difference Bareness and Soil Index)
-  - LST (Land Surface Temperature)
-  - Impact Score (IS) via Tocantins Framework
-  - Severity Score (SS) via Tocantins Framework
+Parallel Processing:
+  ┌─────────────────────────────────────┬─────────────────────────────────────┐
+  │ Spectral Indices (from RAW)         │ Tocantins Framework (from RAW)      │
+  │ - NDBI                               │ - Impact Score (IS)                 │
+  │ - NDVI                               │ - Severity Score (SS)               │
+  │ - NDWI                               │                                     │
+  │ - NDBSI                              │  IMPORTANT: Tocantins requires   │
+  │ - LST                                │ RAW Landsat bands (SR_B*, ST_B*)   │
+  └─────────────────────────────────────┴─────────────────────────────────────┘
+    ↓
+Complete Feature Files: [NDBI, NDVI, NDWI, NDBSI, LST, IS, SS]
     ↓
 ConvLSTM Training (spatiotemporal sequence learning)
     ↓
@@ -193,6 +196,16 @@ Residual Analysis (predicted - current)
     ↓
 Intervention Priority Mapping
 ```
+
+### Critical: Tocantins Framework Requirements
+
+The Tocantins Framework requires **RAW Landsat GeoTIFF files** with all original bands (SR_B1-B7, ST_B10). It does NOT work with pre-processed feature files.
+
+**Internal Processing Flow:**
+1. **BandProcessor** reads RAW files → calculates spectral indices → saves `*_features.tif`
+2. **TocantinsIntegration** reads RAW files → calculates IS/SS → merges with features → saves `*_features_complete.tif`
+
+Both processors work on the same RAW input files in parallel, then results are merged.
 
 ### Model Architecture
 
@@ -234,6 +247,8 @@ indices:
   calculate_ndbsi: true
   calculate_lst: true
 
+# Tocantins Framework parameters
+# Note: Tocantins processes RAW Landsat files internally
 tocantins:
   enabled: true
   k_threshold: 1.5
@@ -326,7 +341,7 @@ residuals = analyzer.calculate_all_residuals()
 
 - **Satellite**: Landsat 5/7/8/9
 - **Collection**: Level-2, Collection 2
-- **Bands**: SR_B1-B7, ST_B10, QA_PIXEL
+- **Bands**: SR_B1-B7, ST_B10, QA_PIXEL (**Required for Tocantins**)
 - **Temporal Range**: YOUR CUSTOM RANGE (e.g., 2000-2022, 1985-2023, etc.)
 - **Temporal Resolution**: Annual, biennial, or custom intervals
 - **Season**: Configurable (e.g., dry season, growing season)
@@ -343,6 +358,13 @@ L5_GeoTIFF_2000-07-01_2000-12-31_cropped.tif
 L8_GeoTIFF_2022-07-01_2022-12-31_cropped.tif
 ```
 
+### Important Notes on Data Requirements
+
+1. **RAW Files Required**: Your input directory must contain RAW Landsat GeoTIFFs with all bands
+2. **Tocantins Dependency**: The Tocantins Framework needs access to raw spectral and thermal bands (SR_B1-B7, ST_B10)
+3. **File Location**: Keep all RAW files in the same directory specified as `input_dir` in the pipeline
+4. **Do Not Pre-Process**: Do not manually calculate indices before running UrbanAI - the pipeline handles this automatically
+
 ### Important Notes on Temporal Configuration
 
 1. **Start and End Years**: Define these based on YOUR available Landsat data
@@ -355,7 +377,7 @@ L8_GeoTIFF_2022-07-01_2022-12-31_cropped.tif
 
 ### Google Earth Engine Script
 
-Use the provided GEE script (included in the repository) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
+Use the provided GEE script (`scripts/gee_export.js`) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
 
 ---
 
@@ -365,10 +387,13 @@ Use the provided GEE script (included in the repository) to export Landsat compo
 
 ```
 data/processed/
-├── 2000_features.tif       # 7-band: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
-├── 2002_features.tif
-├── ...
-└── 2022_features.tif
+├── indices/
+│   ├── 2000_features.tif       # 5-band: NDBI, NDVI, NDWI, NDBSI, LST
+│   ├── 2002_features.tif
+│   └── ...
+├── 2000_features_complete.tif  # 7-band: includes IS, SS
+├── 2002_features_complete.tif
+└── ...
 ```
 
 ### Model Outputs
@@ -408,8 +433,38 @@ urbanai train --data data/processed --config configs/model_config.yaml --epochs 
 urbanai predict --model models/convlstm_best.pth --year 2030 --output results/predictions
 
 # Generate intervention map
-urbanai analyze --current data/processed/2022_features.tif --predicted results/predictions/2030_predicted.tif --output results/analysis
+urbanai analyze --current data/processed/2022_features_complete.tif --predicted results/predictions/2030_predicted.tif --output results/analysis
 ```
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. "Index out of bounds" error with Tocantins
+
+**Error**: `IndexError: index 5 is out of bounds for axis 0 with size 5`
+
+**Cause**: Trying to run Tocantins on processed feature files instead of RAW Landsat files.
+
+**Solution**: Ensure your `input_dir` contains RAW Landsat GeoTIFFs with all bands (SR_B1-B7, ST_B10). The pipeline handles the workflow internally.
+
+#### 2. Missing bands in RAW files
+
+**Error**: `Missing required bands: ['swir1', 'thermal']`
+
+**Cause**: RAW Landsat file doesn't contain all required bands.
+
+**Solution**: Re-export from Google Earth Engine using the provided script, ensuring all bands are included.
+
+#### 3. Year validation errors
+
+**Error**: `Target year must be greater than current year`
+
+**Cause**: Trying to predict a year within or before your training data range.
+
+**Solution**: Ensure `predict_year > end_year` in your configuration.
 
 ---
 
@@ -429,6 +484,10 @@ if n_years < sequence_length:
 
 # 3. Consistent temporal intervals
 # Automatically detects and validates your temporal spacing
+
+# 4. RAW file availability for Tocantins
+if tocantins_enabled and not raw_files:
+    raise ValueError("Tocantins requires RAW Landsat files")
 ```
 
 ---
@@ -441,6 +500,12 @@ if n_years < sequence_length:
 2. **Minimum History**: At least 10 timesteps recommended for robust training
 3. **Prediction Horizon**: Longer predictions (>10 years) increase uncertainty
 4. **Validation Split**: Reserve latest years for validation (automatic in framework)
+
+### Data Management
+
+1. **Keep RAW Files**: Don't delete RAW Landsat files after preprocessing - Tocantins needs them
+2. **Organize by Year**: Use consistent naming conventions for easy year detection
+3. **Backup Outputs**: Processed features can be regenerated, but save model checkpoints
 
 ### Example Configurations
 
