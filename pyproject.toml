@@ -89,9 +89,10 @@ Repository = "https://github.com/EcoAcao-Brasil/ecoacao-urbanai"
 [project.scripts]
 urbanai = "urbanai.cli:main"
 
-[tool.setuptools]
-packages = ["urbanai"]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["urbanai*"]
+exclude = ["tests*"]
 
 [tool.setuptools.package-data]
 urbanai = ["configs/*.yaml", "py.typed"]
