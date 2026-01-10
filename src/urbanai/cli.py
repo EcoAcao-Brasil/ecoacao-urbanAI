@@ -14,21 +14,22 @@ from urbanai.pipeline import UrbanAIPipeline
 
 logger = logging.getLogger(__name__)
 
+
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         description="UrbanAI - Urban Heat Island Prediction Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    
+
     parser.add_argument(
         "--version",
         action="version",
         version=f"UrbanAI {__version__}",
     )
-    
+
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
-    
+
     # Run complete pipeline
     run_parser = subparsers.add_parser("run", help="Run complete pipeline")
     run_parser.add_argument("--input", required=True, help="Input data directory")
@@ -37,13 +38,13 @@ def main() -> None:
     run_parser.add_argument("--predict-year", type=int, default=2030, help="Year to predict")
     run_parser.add_argument("--device", default="auto", help="Device (cuda/cpu/auto)")
     run_parser.add_argument("--verbose", action="store_true", help="Verbose logging")
-    
+
     # Preprocess only
     preprocess_parser = subparsers.add_parser("preprocess", help="Preprocess data only")
     preprocess_parser.add_argument("--input", required=True, help="Raw data directory")
     preprocess_parser.add_argument("--output", required=True, help="Output directory")
     preprocess_parser.add_argument("--config", help="Configuration file")
-    
+
     # Train only
     train_parser = subparsers.add_parser("train", help="Train model only")
     train_parser.add_argument("--data", required=True, help="Processed data directory")
@@ -52,7 +53,7 @@ def main() -> None:
     train_parser.add_argument("--epochs", type=int, default=100, help="Training epochs")
     train_parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     train_parser.add_argument("--device", default="auto", help="Device")
-    
+
     # Predict only
     predict_parser = subparsers.add_parser("predict", help="Predict future only")
     predict_parser.add_argument("--model", required=True, help="Model checkpoint path")
@@ -60,25 +61,26 @@ def main() -> None:
     predict_parser.add_argument("--year", type=int, required=True, help="Year to predict")
     predict_parser.add_argument("--output", required=True, help="Output directory")
     predict_parser.add_argument("--device", default="auto", help="Device")
-    
+
     # Analyze only
     analyze_parser = subparsers.add_parser("analyze", help="Analyze predictions")
     analyze_parser.add_argument("--current", required=True, help="Current year raster")
     analyze_parser.add_argument("--predicted", required=True, help="Predicted raster")
     analyze_parser.add_argument("--output", required=True, help="Output directory")
-    
+    analyze_parser.add_argument("--config", help="Configuration file (optional)")
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     # Setup logging
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(message)s",
     )
-    
+
     try:
         if args.command == "run":
             run_pipeline(args)
@@ -102,11 +104,11 @@ def run_pipeline(args) -> None:
         output_dir=args.output,
         config=args.config,
         device=args.device,
-        verbose=getattr(args, 'verbose', False),
+        verbose=getattr(args, "verbose", False),
     )
-    
+
     results = pipeline.run(predict_year=args.predict_year)
-    
+
     if results["status"] == "success":
         logger.info("\nPipeline completed successfully.")
         logger.info(f"Results saved to: {args.output}")
@@ -118,13 +120,13 @@ def run_pipeline(args) -> None:
 def run_preprocess(args) -> None:
     """Run preprocessing only."""
     from urbanai.preprocessing import TemporalDataProcessor
-    
+
     processor = TemporalDataProcessor(
         raw_dir=args.input,
         output_dir=args.output,
         config=args.config,
     )
-    
+
     results = processor.process_all_years()
     logger.info(f"\n Preprocessing complete: {len(results)} years processed")
 
@@ -132,67 +134,79 @@ def run_preprocess(args) -> None:
 def run_train(args) -> None:
     """Run training only."""
     from urbanai.training import UrbanAITrainer
-    
+
     trainer = UrbanAITrainer(
         data_dir=args.data,
         output_dir=args.output,
         config=args.config,
         device=args.device,
     )
-    
+
     results = trainer.train(
         epochs=args.epochs,
         batch_size=args.batch_size,
     )
-    
-    logger.info(f"\n Training complete")
+
+    logger.info("\n Training complete")
     logger.info(f"Best validation loss: {results['best_loss']:.6f}")
 
 
 def run_predict(args) -> None:
     """Run prediction only."""
     from urbanai.prediction import FuturePredictor
-    
+
     predictor = FuturePredictor(
         model_path=args.model,
         data_dir=args.data,
         output_dir=args.output,
         device=args.device,
     )
-    
+
     results = predictor.predict(
         current_year=2025,
         target_year=args.year,
         save_outputs=True,
     )
-    
+
     logger.info(f"\n Prediction complete for {args.year}")
     logger.info(f"Output: {results['output_path']}")
 
 
 def run_analyze(args) -> None:
     """Run analysis only."""
+    import yaml
+
     from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
-    
+
+    # Load config if provided
+    weights = None
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                weights = config.get("analysis", {}).get("priority_weights")
+
     # Calculate residuals
     residual_calc = ResidualCalculator(
         current_raster=args.current,
         future_raster=args.predicted,
         output_dir=args.output,
+        weights=weights,
     )
-    
+
     residuals = residual_calc.calculate_all_residuals()
-    
+
     # Analyze interventions
     analyzer = InterventionAnalyzer(
         residuals_path=residuals["combined_residuals"],
         current_raster=args.current,
         output_dir=args.output,
     )
-    
+
     priorities = analyzer.identify_priority_zones(save_geojson=True)
-    
-    logger.info(f"\n Analysis complete")
+
+    logger.info("\n Analysis complete")
     logger.info(f"Priority zones: {priorities['n_hotspot_zones']}")
     logger.info(f"Output: {args.output}")
 

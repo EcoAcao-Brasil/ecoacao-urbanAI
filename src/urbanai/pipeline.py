@@ -36,7 +36,7 @@ class UrbanAIPipeline:
     ) -> None:
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-        
+
         # Ensure we have a place to dump logs and results immediately
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,7 +64,7 @@ class UrbanAIPipeline:
     ) -> Dict[str, Any]:
         """
         Runs the pipeline stages in sequence.
-        
+
         You can toggle specific stages off (e.g., set train=False to use a saved model).
         Note: `predict_year` is mandatory if you want to generate new forecasts or analysis.
         """
@@ -190,13 +190,13 @@ class UrbanAIPipeline:
         predictions_dir.mkdir(exist_ok=True)
 
         processed_dir = self.output_dir / "processed"
-        
+
         # Dynamically determine the most recent year from available data
         current_year = self._get_most_recent_year(processed_dir)
-        
+
         if current_year is None:
             raise ValueError(f"No processed files found in {processed_dir}")
-        
+
         if target_year <= current_year:
             raise ValueError(
                 f"Target year ({target_year}) must be greater than the most recent "
@@ -225,24 +225,24 @@ class UrbanAIPipeline:
     def _run_analysis(self, target_year: int) -> Dict[str, Any]:
         """Compares current state vs. predicted state to identify priority zones."""
         processed_dir = self.output_dir / "processed"
-        
+
         # Dynamically determine the most recent year
         current_year = self._get_most_recent_year(processed_dir)
-        
+
         if current_year is None:
             raise ValueError(f"No processed files found in {processed_dir}")
 
         current_raster = processed_dir / f"{current_year}_features_complete.tif"
-        
+
         # Handle alternative naming patterns
         if not current_raster.exists():
             current_raster = processed_dir / f"{current_year}_features.tif"
-            
+
         if not current_raster.exists():
             raise FileNotFoundError(
                 f"Could not find raster for year {current_year} in {processed_dir}"
             )
-        
+
         predicted_raster = self._predictions["output_path"]
 
         analysis_dir = self.output_dir / "analysis"
@@ -253,6 +253,7 @@ class UrbanAIPipeline:
             current_raster=current_raster,
             future_raster=predicted_raster,
             output_dir=analysis_dir,
+            weights=self.config.get("analysis", {}).get("priority_weights"),
         )
         residuals = residual_calc.calculate_all_residuals()
 
@@ -309,25 +310,25 @@ class UrbanAIPipeline:
     def _get_most_recent_year(self, data_dir: Path) -> Optional[int]:
         """
         Dynamically determine the most recent year from available processed files.
-        
+
         Args:
             data_dir: Directory containing processed feature files
-            
+
         Returns:
             Most recent year, or None if no files found
         """
         files = sorted(data_dir.glob("*_features*.tif"))
-        
+
         if not files:
             return None
-        
+
         years = sorted([self._extract_year(f.name) for f in files])
         return max(years)
 
     @staticmethod
     def _extract_year(filename: str) -> int:
         """Extract year from filename."""
-        import re
+
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
@@ -359,7 +360,7 @@ class UrbanAIPipeline:
     def _default_config() -> Dict[str, Any]:
         """
         Provides sensible defaults for standard ConvLSTM heat prediction.
-        
+
         Note: These defaults use 1985-2023 as an example range. Users should
         update these values based on their specific data availability.
         """

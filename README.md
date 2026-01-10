@@ -288,6 +288,53 @@ training:
     min_delta: 0.0001
 ```
 
+### Customizing Intervention Priority Weights
+
+The intervention analysis uses a weighted combination of metrics to identify priority zones for urban heat mitigation. You can customize these weights in your configuration file or when using the `ResidualCalculator` directly.
+
+#### Configuration File
+
+```yaml
+analysis:
+  threshold: high  # low, medium, high, or custom value (0.0-1.0)
+  
+  # Priority scoring weights (configurable)
+  priority_weights:
+    LST: 0.4   # Land Surface Temperature - direct heat measure
+    IS: 0.3    # Impact Score - spatial extent of thermal anomaly
+    SS: 0.2    # Severity Score - intensity of thermal anomaly  
+    NDBI: 0.1  # Normalized Difference Built-up Index
+```
+
+**Default weights** (if not specified): `LST=0.4, IS=0.3, SS=0.2, NDBI=0.1`
+
+**Important**: Weights don't need to sum to 1.0 - they will be normalized automatically during the residual calculation.
+
+#### Programmatic Usage
+
+```python
+from urbanai.analysis import ResidualCalculator
+
+# Example: Emphasize LST over other metrics
+analyzer = ResidualCalculator(
+    current_raster="data/processed/2022_features_complete.tif",
+    future_raster="predictions/2030_prediction.tif",
+    weights={
+        "LST": 0.5,   # Increase LST importance
+        "IS": 0.25,   # Impact Score
+        "SS": 0.20,   # Severity Score
+        "NDBI": 0.05  # Built-up index
+    }
+)
+residuals = analyzer.calculate_all_residuals()
+```
+
+**Metric Descriptions:**
+- **LST** (Land Surface Temperature): Direct measure of surface heat
+- **IS** (Impact Score): Spatial extent of thermal anomalies (from Tocantins Framework)
+- **SS** (Severity Score): Intensity of thermal anomalies (from Tocantins Framework)
+- **NDBI** (Normalized Difference Built-up Index): Proxy for urbanization level
+
 ---
 
 ## Input Data Requirements
