@@ -120,7 +120,7 @@ class BandProcessor:
         return results
 
     def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
-        """Read required bands from raster."""
+        """Read required bands from raster with auto-detection."""
         bands = {}
         descriptions = list(src.descriptions or [])
         
@@ -130,24 +130,32 @@ class BandProcessor:
         # Auto-detect Landsat version from thermal band
         if "ST_B6" in descriptions:
             # Landsat 5/7
+            logger.debug("Detected Landsat 5/7 from ST_B6 thermal band")
             band_map = self.BAND_MAPPING[5]
         elif "ST_B10" in descriptions:
             # Landsat 8/9
+            logger.debug("Detected Landsat 8/9 from ST_B10 thermal band")
             band_map = self.BAND_MAPPING[8]
         else:
-            raise ValueError(f"Cannot detect Landsat version. Bands: {descriptions}")
+            # Fallback to initialized version
+            logger.warning(f"Could not auto-detect Landsat version. Using configured: L{self.landsat_version}")
+            band_map = self.band_map
         
-        # Read bands
+        # Read bands using detected mapping
         for common_name, band_name in band_map.items():
             if band_name in descriptions:
                 band_idx = descriptions.index(band_name) + 1
                 bands[common_name] = src.read(band_idx).astype(np.float32)
         
-        # Validate required bands
-        required = ["red", "nir", "swir1", "thermal"]
+        # Validate required bands are present
+        required = ["red", "nir", "swir1", "thermal", "blue", "green"]
         missing = [b for b in required if b not in bands]
         if missing:
-            raise ValueError(f"Missing required bands: {missing}. Available: {list(bands.keys())}")
+            raise ValueError(
+                f"Missing required bands: {missing}\n"
+                f"Available bands in file: {descriptions}\n"
+                f"Looking for: {list(band_map.values())}"
+            )
         
         return bands
 
