@@ -6,8 +6,10 @@ Provides CLI commands for running UrbanAI workflows.
 
 import argparse
 import logging
+import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 from urbanai import __version__
 from urbanai.pipeline import UrbanAIPipeline
@@ -155,6 +157,21 @@ def run_predict(args) -> None:
     """Run prediction only."""
     from urbanai.prediction import FuturePredictor
 
+    # Dynamically determine the most recent year from available data
+    data_dir = Path(args.data)
+    current_year = _get_most_recent_year(data_dir)
+
+    if current_year is None:
+        raise ValueError(f"No processed files found in {data_dir}")
+
+    if args.year <= current_year:
+        raise ValueError(
+            f"Target year ({args.year}) must be greater than the most recent "
+            f"data year ({current_year})"
+        )
+
+    logger.info(f"Predicting from {current_year} to {args.year}")
+
     predictor = FuturePredictor(
         model_path=args.model,
         data_dir=args.data,
@@ -163,7 +180,7 @@ def run_predict(args) -> None:
     )
 
     results = predictor.predict(
-        current_year=2025,
+        current_year=current_year,
         target_year=args.year,
         save_outputs=True,
     )
@@ -209,6 +226,33 @@ def run_analyze(args) -> None:
     logger.info("\n Analysis complete")
     logger.info(f"Priority zones: {priorities['n_hotspot_zones']}")
     logger.info(f"Output: {args.output}")
+
+
+def _get_most_recent_year(data_dir: Path) -> Optional[int]:
+    """
+    Dynamically determine the most recent year from available processed files.
+
+    Args:
+        data_dir: Directory containing processed feature files
+
+    Returns:
+        Most recent year, or None if no files found
+    """
+    files = sorted(data_dir.glob("*_features*.tif"))
+
+    if not files:
+        return None
+
+    years = sorted([_extract_year(f.name) for f in files])
+    return max(years)
+
+
+def _extract_year(filename: str) -> int:
+    """Extract year from filename."""
+    match = re.search(r"(\d{4})", filename)
+    if match:
+        return int(match.group(1))
+    raise ValueError(f"Could not extract year from: {filename}")
 
 
 if __name__ == "__main__":
