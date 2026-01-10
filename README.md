@@ -31,32 +31,15 @@ UrbanAI is a comprehensive deep learning framework for assessing the evolution o
 
 ## Installation
 
-### From PyPI (Recommended)
+### From PyPI (Recommended) - Standard
 
 ```bash
 pip install urbanai
 ```
 
-### From Source
-
-```bash
-git clone https://github.com/EcoAcao-Brasil/ecoacao-urbanai
-cd ecoacao-urbanai
-pip install -e .
-```
-
-### Development Installation
-
-```bash
-pip install -e ".[dev]"
-pre-commit install
-```
-
-### Google Colab
-
-```python
-!pip install urbanai tocantins-framework
-```
+### Requirements
+- GDAL must be installed separately (pre-installed in Google Colab)
+- For local environments: `conda install -c conda-forge gdal`
 
 ---
 
@@ -372,7 +355,7 @@ L8_GeoTIFF_2022-07-01_2022-12-31_cropped.tif
 
 ### Google Earth Engine Script
 
-Use the provided GEE script (included in repository) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
+Use the provided GEE script (included in the repository) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
 
 ---
 
