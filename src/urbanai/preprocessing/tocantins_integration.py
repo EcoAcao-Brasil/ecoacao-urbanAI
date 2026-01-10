@@ -1,7 +1,9 @@
 """
-Tocantins Framework Integration
+ Tocantins Framework Integration
 
-Calculates Impact Score (IS) and Severity Score (SS) using the Tocantins Framework.
+1. Tocantins processes RAW Landsat files, not feature files
+2. Batch processor now tracks raw file paths
+3. Results are merged with existing feature files
 """
 
 import logging
@@ -24,14 +26,9 @@ class TocantinsCalculationError(Exception):
 class TocantinsIntegration:
     """
     Integration with Tocantins Framework for thermal anomaly detection.
-
-    Calculates Impact Score (IS) and Severity Score (SS) from processed
-    Landsat imagery with spectral indices.
-
-    Args:
-        k_threshold: Residual threshold multiplier for anomaly detection
-        spatial_params: Spatial processing parameters
-        rf_params: Random Forest parameters
+    
+    IMPORTANT: Tocantins requires RAW Landsat GeoTIFFs with all bands.
+    Do NOT pass processed feature files.
     """
 
     def __init__(
@@ -49,38 +46,26 @@ class TocantinsIntegration:
 
     def calculate_scores(
         self,
-        input_path: Path,
+        raw_landsat_path: Path,  # ← Changed parameter name for clarity
         output_dir: Optional[Path] = None,
         save_intermediate: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, Dict]:
         """
-        Calculates IS and SS for a raster with spectral indices.
+        Calculates IS and SS from RAW Landsat GeoTIFF.
 
         Args:
-            input_path: Path to GeoTIFF with bands [NDBI, NDVI, NDWI, NDBSI, LST]
+            raw_landsat_path: Path to RAW Landsat GeoTIFF (with SR_B* and ST_B* bands)
             output_dir: Directory to save outputs
             save_intermediate: Save intermediate Tocantins outputs
 
         Returns:
             Tuple of (impact_scores, severity_scores, metadata)
         """
-        logger.info(f"Calculating Tocantins scores for: {input_path.name}")
+        logger.info(f"Calculating Tocantins scores for: {raw_landsat_path.name}")
 
-        # Setup output directory
         if output_dir:
             output_dir = Path(output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Read input raster
-        with rasterio.open(input_path) as src:
-            metadata = src.meta.copy()
-            bands = self._read_bands(src)
-
-        # Validate required bands
-        required = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
-        missing = [b for b in required if b not in bands]
-        if missing:
-            raise ValueError(f"Missing required bands: {missing}")
 
         # Initialize Tocantins calculator
         calculator = TocantinsFrameworkCalculator(
@@ -89,13 +74,10 @@ class TocantinsIntegration:
             rf_params=self.rf_params,
         )
 
-        # Create temporary GeoTIFF with required format for Tocantins
-        temp_path = self._create_tocantins_input(bands, metadata, input_path)
-
         try:
-            # Run Tocantins Framework
+            # Run Tocantins Framework on RAW file
             success = calculator.run_complete_analysis(
-                tif_path=str(temp_path),
+                tif_path=str(raw_landsat_path),
                 output_dir=str(output_dir) if output_dir else None,
                 save_results=save_intermediate,
             )
@@ -115,53 +97,9 @@ class TocantinsIntegration:
 
             return impact_scores, severity_scores, stats
 
-        finally:
-            # Cleanup temporary file
-            if temp_path.exists():
-                temp_path.unlink()
-
-    def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
-        """Reads bands from raster."""
-        bands = {}
-        descriptions = src.descriptions or []
-
-        # Map band descriptions to data
-        for i, desc in enumerate(descriptions, start=1):
-            if desc in ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]:
-                bands[desc] = src.read(i).astype(np.float32)
-
-        return bands
-
-    def _create_tocantins_input(
-        self,
-        bands: Dict[str, np.ndarray],
-        metadata: Dict,
-        original_path: Path,
-    ) -> Path:
-        """
-        Creates temporary GeoTIFF in Tocantins-compatible format.
-
-        Tocantins expects: SR_B1-B7, ST_B10, and calculated indices.
-        """
-        temp_path = original_path.parent / f"temp_tocantins_{original_path.name}"
-
-        # Update metadata
-        meta = metadata.copy()
-        meta.update({
-            "count": len(bands),
-            "dtype": "float32",
-        })
-
-        # Write bands in expected order
-        band_order = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
-
-        with rasterio.open(temp_path, "w", **meta) as dst:
-            for i, band_name in enumerate(band_order, start=1):
-                if band_name in bands:
-                    dst.write(bands[band_name], i)
-                    dst.set_band_description(i, band_name)
-
-        return temp_path
+        except Exception as e:
+            logger.error(f"Tocantins calculation failed: {e}")
+            raise
 
     def _extract_impact_scores(
         self,
@@ -169,7 +107,6 @@ class TocantinsIntegration:
     ) -> np.ndarray:
         """Extracts Impact Scores from the Tocantins calculator."""
         try:
-            # Retrieve feature set containing Impact Scores
             feature_set = calculator.get_feature_set()
 
             if feature_set is None or feature_set.empty:
@@ -177,14 +114,10 @@ class TocantinsIntegration:
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
 
-            # Get spatial dimensions
             classification_map = calculator.get_classification_map()
             height, width = classification_map.shape
-
-            # Initialize Impact Score raster
             is_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Map Impact Score values to spatial coordinates
             for _, row in feature_set.iterrows():
                 if "impact_score" in row and "pixels" in row:
                     pixels = row["pixels"]
@@ -194,26 +127,15 @@ class TocantinsIntegration:
                             if 0 <= y < height and 0 <= x < width:
                                 is_raster[y, x] = row["impact_score"]
 
-            # Validate population of raster values
             if np.max(is_raster) == 0:
                 logger.warning("Tocantins: Impact Score calculation produced all zeros.")
-            else:
-                min_val = np.min(is_raster[is_raster > 0])
-                max_val = np.max(is_raster)
-                logger.info(f"Impact Scores calculated successfully. Range: [{min_val:.3f}, {max_val:.3f}]")
 
             return is_raster
 
         except Exception as e:
-            logger.error(f"Tocantins Impact Score extraction failed: {e}")
-            logger.warning("Returning zero array for Impact Scores due to extraction failure.")
-            
-            # Attempt fallback to zero array; raise critical error if dimension retrieval fails
-            try:
-                classification_map = calculator.get_classification_map()
-                return np.zeros_like(classification_map, dtype=np.float32)
-            except Exception as critical_error:
-                raise TocantinsCalculationError(f"Critical preprocessing failure: {critical_error}") from e
+            logger.error(f"Impact Score extraction failed: {e}")
+            classification_map = calculator.get_classification_map()
+            return np.zeros_like(classification_map, dtype=np.float32)
 
     def _extract_severity_scores(
         self,
@@ -221,7 +143,6 @@ class TocantinsIntegration:
     ) -> np.ndarray:
         """Extracts Severity Scores from the Tocantins calculator."""
         try:
-            # Retrieve severity scores dataframe
             severity_df = calculator.get_severity_scores()
 
             if severity_df is None or severity_df.empty:
@@ -229,14 +150,10 @@ class TocantinsIntegration:
                 classification_map = calculator.get_classification_map()
                 return np.zeros_like(classification_map, dtype=np.float32)
 
-            # Get spatial dimensions
             classification_map = calculator.get_classification_map()
             height, width = classification_map.shape
-
-            # Initialize Severity Score raster
             ss_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Map Severity Score values to spatial coordinates
             for _, row in severity_df.iterrows():
                 if "severity_score" in row and "core_pixels" in row:
                     pixels = row["core_pixels"]
@@ -246,26 +163,15 @@ class TocantinsIntegration:
                             if 0 <= y < height and 0 <= x < width:
                                 ss_raster[y, x] = row["severity_score"]
 
-            # Validate population of raster values
             if np.max(ss_raster) == 0:
                 logger.warning("Tocantins: Severity Score calculation produced all zeros.")
-            else:
-                min_val = np.min(ss_raster[ss_raster > 0])
-                max_val = np.max(ss_raster)
-                logger.info(f"Severity Scores calculated successfully. Range: [{min_val:.3f}, {max_val:.3f}]")
 
             return ss_raster
 
         except Exception as e:
-            logger.error(f"Tocantins Severity Score extraction failed: {e}")
-            logger.warning("Returning zero array for Severity Scores due to extraction failure.")
-            
-            # Attempt fallback to zero array; raise critical error if dimension retrieval fails
-            try:
-                classification_map = calculator.get_classification_map()
-                return np.zeros_like(classification_map, dtype=np.float32)
-            except Exception as critical_error:
-                raise TocantinsCalculationError(f"Cannot extract severity scores: {critical_error}") from e
+            logger.error(f"Severity Score extraction failed: {e}")
+            classification_map = calculator.get_classification_map()
+            return np.zeros_like(classification_map, dtype=np.float32)
 
     def _calculate_statistics(
         self,
@@ -313,8 +219,9 @@ class TocantinsIntegration:
 class BatchTocantinsProcessor:
     """
     Process multiple rasters with Tocantins Framework.
-
-    Handles batch processing of temporal sequences.
+    
+    CRITICAL FIX: This now processes RAW Landsat files, then merges
+    IS/SS scores with existing feature files.
     """
 
     def __init__(
@@ -331,18 +238,18 @@ class BatchTocantinsProcessor:
 
     def process_time_series(
         self,
-        input_dir: Path,
+        raw_dir: Path,           # ← RAW Landsat directory
+        features_dir: Path,       # ← Processed features directory  
         output_dir: Path,
-        pattern: str = "*_features.tif",
         save_intermediate: bool = False,
     ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
         """
-        Process all rasters in directory with Tocantins.
+        Process RAW Landsat files with Tocantins, then merge with features.
 
         Args:
-            input_dir: Directory with processed feature rasters
-            output_dir: Directory for Tocantins outputs
-            pattern: Filename pattern
+            raw_dir: Directory with RAW Landsat GeoTIFFs (*_cropped.tif)
+            features_dir: Directory with processed feature rasters (*_features.tif)
+            output_dir: Directory for final outputs
             save_intermediate: Save intermediate results
 
         Returns:
@@ -350,32 +257,37 @@ class BatchTocantinsProcessor:
         """
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        input_files = sorted(input_dir.glob(pattern))
-        if not input_files:
-            raise ValueError(f"No files matching {pattern} in {input_dir}")
+        # Find RAW Landsat files
+        raw_files = sorted(raw_dir.glob("*_cropped.tif"))
+        if not raw_files:
+            raise ValueError(f"No RAW Landsat files (*_cropped.tif) found in {raw_dir}")
 
-        logger.info(f"Processing {len(input_files)} rasters with Tocantins Framework.")
+        logger.info(f"Processing {len(raw_files)} RAW Landsat files with Tocantins Framework.")
 
         results = {}
-        for input_path in input_files:
-            year = self._extract_year(input_path.name)
-
+        for raw_path in raw_files:
+            year = self._extract_year(raw_path.name)
             logger.info(f"Processing year: {year}")
 
-            # Calculate scores
+            # Calculate IS/SS from RAW file
             year_output_dir = output_dir / str(year) if save_intermediate else None
 
             is_raster, ss_raster, stats = self.integration.calculate_scores(
-                input_path=input_path,
+                raw_landsat_path=raw_path,
                 output_dir=year_output_dir,
                 save_intermediate=save_intermediate,
             )
 
             results[year] = (is_raster, ss_raster)
 
-            # Save combined raster
+            # Merge with existing features
+            feature_path = features_dir / f"{year}_features.tif"
+            if not feature_path.exists():
+                logger.warning(f"Feature file not found: {feature_path}, skipping merge")
+                continue
+
             self._save_combined(
-                input_path, is_raster, ss_raster, output_dir, year
+                feature_path, is_raster, ss_raster, output_dir, year
             )
 
         logger.info(f"Completed Tocantins processing for {len(results)} years.")
@@ -383,14 +295,14 @@ class BatchTocantinsProcessor:
 
     def _save_combined(
         self,
-        input_path: Path,
+        feature_path: Path,
         is_raster: np.ndarray,
         ss_raster: np.ndarray,
         output_dir: Path,
         year: int,
     ) -> None:
-        """Saves combined raster with all features + IS + SS."""
-        with rasterio.open(input_path) as src:
+        """Merges IS/SS with existing feature file."""
+        with rasterio.open(feature_path) as src:
             meta = src.meta.copy()
             existing_bands = [src.read(i) for i in range(1, src.count + 1)]
             descriptions = list(src.descriptions or [])
