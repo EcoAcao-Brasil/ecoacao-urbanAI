@@ -26,14 +26,14 @@ class ResidualCalculator:
         output_dir: Directory for outputs
         weights: Optional dictionary of priority weights for combining residuals.
             If not provided, uses default weights: LST=0.4, IS=0.3, SS=0.2, NDBI=0.1
-            
+
     Example:
         >>> # Use default weights
         >>> calc = ResidualCalculator(
         ...     current_raster="data/2022.tif",
         ...     future_raster="predictions/2030.tif"
         ... )
-        
+
         >>> # Custom weights (emphasize LST)
         >>> calc = ResidualCalculator(
         ...     current_raster="data/2022.tif",
@@ -61,7 +61,7 @@ class ResidualCalculator:
             "SS": 0.2,
             "NDBI": 0.1,
         }
-        
+
         # Validate weights
         self._validate_weights()
 
@@ -143,7 +143,7 @@ class ResidualCalculator:
             descriptions = list(src.descriptions or [])
             if band_name not in descriptions:
                 raise ValueError(f"Band {band_name} not found")
-            
+
             band_idx = descriptions.index(band_name) + 1
             current = src.read(band_idx)
 
@@ -180,7 +180,7 @@ class ResidualCalculator:
         Calculate combined residual with weighted importance.
 
         Uses weights from self.weights (configurable via constructor).
-        
+
         Args:
             residuals: Array of residuals (bands, h, w)
             band_names: List of band names
@@ -210,7 +210,7 @@ class ResidualCalculator:
     def _normalize_residual(residual: np.ndarray) -> np.ndarray:
         """
         Normalize residual to [-1, 1] range.
-        
+
         Args:
             residual: Input residual array
 
@@ -252,4 +252,3 @@ class ResidualCalculator:
             }
 
         return stats
-      
