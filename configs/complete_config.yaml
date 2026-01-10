@@ -126,12 +126,18 @@ analysis:
   min_area_pixels: 10
   min_area_m2: 900  # Minimum area in square meters (for 30m pixels)
   
-  # Priority scoring
+  # Priority scoring weights (CONFIGURABLE - actively used by ResidualCalculator)
+  # These weights determine how different metrics are combined to calculate
+  # intervention priorities. Higher weight = more importance in the final score.
+  # Weights are normalized automatically (don't need to sum to 1.0).
+  #
+  # If not specified in config, the default values below will be used.
+  # You can customize these to match your regional priorities or research focus.
   priority_weights:
-    LST: 0.4  # Land Surface Temperature
-    IS: 0.3   # Impact Score
-    SS: 0.2   # Severity Score
-    NDBI: 0.1 # Built-up Index
+    LST: 0.4   # Land Surface Temperature - direct measure of surface heat
+    IS: 0.3    # Impact Score - spatial extent of thermal anomaly (from Tocantins)
+    SS: 0.2    # Severity Score - intensity of thermal anomaly (from Tocantins)
+    NDBI: 0.1  # Normalized Difference Built-up Index - urbanization proxy
   
   # Output options
   save_geojson: true

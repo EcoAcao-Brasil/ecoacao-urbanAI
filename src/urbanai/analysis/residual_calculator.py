@@ -24,6 +24,22 @@ class ResidualCalculator:
         current_raster: Path to current year raster
         future_raster: Path to predicted future raster
         output_dir: Directory for outputs
+        weights: Optional dictionary of priority weights for combining residuals.
+            If not provided, uses default weights: LST=0.4, IS=0.3, SS=0.2, NDBI=0.1
+            
+    Example:
+        >>> # Use default weights
+        >>> calc = ResidualCalculator(
+        ...     current_raster="data/2022.tif",
+        ...     future_raster="predictions/2030.tif"
+        ... )
+        
+        >>> # Custom weights (emphasize LST)
+        >>> calc = ResidualCalculator(
+        ...     current_raster="data/2022.tif",
+        ...     future_raster="predictions/2030.tif",
+        ...     weights={"LST": 0.5, "IS": 0.25, "SS": 0.20, "NDBI": 0.05}
+        ... )
     """
 
     def __init__(
@@ -31,15 +47,36 @@ class ResidualCalculator:
         current_raster: Path,
         future_raster: Path,
         output_dir: Optional[Path] = None,
+        weights: Optional[Dict[str, float]] = None,
     ) -> None:
         self.current_raster = Path(current_raster)
         self.future_raster = Path(future_raster)
         self.output_dir = Path(output_dir) if output_dir else Path("residuals")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Set default weights if not provided
+        self.weights = weights or {
+            "LST": 0.4,
+            "IS": 0.3,
+            "SS": 0.2,
+            "NDBI": 0.1,
+        }
+        
+        # Validate weights
+        self._validate_weights()
+
         logger.info("ResidualCalculator initialized")
         logger.info(f"Current: {self.current_raster.name}")
         logger.info(f"Future: {self.future_raster.name}")
+        logger.info(f"Using priority weights: {self.weights}")
+
+    def _validate_weights(self) -> None:
+        """Validate that weights are positive numbers."""
+        for name, weight in self.weights.items():
+            if not isinstance(weight, (int, float)):
+                raise ValueError(f"Weight for {name} must be a number, got {type(weight)}")
+            if weight < 0:
+                raise ValueError(f"Weight for {name} must be non-negative, got {weight}")
 
     def calculate_all_residuals(self) -> Dict[str, Path]:
         """
@@ -142,7 +179,7 @@ class ResidualCalculator:
         """
         Calculate combined residual with weighted importance.
 
-        Priority weights: LST > IS > SS > NDBI > others
+        Uses weights from self.weights (configurable via constructor).
         
         Args:
             residuals: Array of residuals (bands, h, w)
@@ -151,22 +188,20 @@ class ResidualCalculator:
         Returns:
             Combined residual array (h, w)
         """
-        # Define importance weights for each metric
-        weights = {
-            "LST": 0.4,   # Land Surface Temperature - highest priority
-            "IS": 0.3,    # Impact Score - spatial extent
-            "SS": 0.2,    # Severity Score - intensity
-            "NDBI": 0.1,  # Built-up index
-        }
-
         combined = np.zeros_like(residuals[0])
 
         for i, name in enumerate(band_names):
-            weight = weights.get(name, 0.0)
+            weight = self.weights.get(name, 0.0)
             if weight > 0:
                 # Normalize to [-1, 1] range before combining
                 normalized = self._normalize_residual(residuals[i])
                 combined += weight * normalized
+            elif name in self.weights:
+                # Weight is 0 - skip this band
+                logger.debug(f"Skipping band {name} (weight=0)")
+            else:
+                # Band not in weights - log warning
+                logger.debug(f"Band {name} not in priority weights, using weight=0")
 
         logger.info(f"Combined residual range: [{combined.min():.3f}, {combined.max():.3f}]")
         return combined

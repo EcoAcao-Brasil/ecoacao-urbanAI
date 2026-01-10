@@ -253,6 +253,7 @@ class UrbanAIPipeline:
             current_raster=current_raster,
             future_raster=predicted_raster,
             output_dir=analysis_dir,
+            weights=self.config.get("analysis", {}).get("priority_weights"),
         )
         residuals = residual_calc.calculate_all_residuals()
 
