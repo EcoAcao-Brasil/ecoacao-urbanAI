@@ -68,6 +68,7 @@ def main() -> None:
     analyze_parser.add_argument("--current", required=True, help="Current year raster")
     analyze_parser.add_argument("--predicted", required=True, help="Predicted raster")
     analyze_parser.add_argument("--output", required=True, help="Output directory")
+    analyze_parser.add_argument("--config", help="Configuration file (optional)")
     
     args = parser.parse_args()
     
@@ -77,7 +78,7 @@ def main() -> None:
     
     # Setup logging
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if getattr(args, 'verbose', False) else logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(message)s",
     )
     
@@ -147,7 +148,7 @@ def run_train(args) -> None:
         batch_size=args.batch_size,
     )
     
-    logger.info(f"\n Training complete")
+    logger.info("\n Training complete")
     logger.info(f"Best validation loss: {results['best_loss']:.6f}")
 
 
@@ -192,27 +193,39 @@ def run_predict(args) -> None:
 
 def run_analyze(args) -> None:
     """Run analysis only."""
+    import yaml
+
     from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
-    
+
+    # Load config if provided
+    weights = None
+    if args.config:
+        config_path = Path(args.config)
+        if config_path.exists():
+            with open(config_path) as f:
+                config = yaml.safe_load(f)
+                weights = config.get("analysis", {}).get("priority_weights")
+
     # Calculate residuals
     residual_calc = ResidualCalculator(
         current_raster=args.current,
         future_raster=args.predicted,
         output_dir=args.output,
+        weights=weights,
     )
-    
+
     residuals = residual_calc.calculate_all_residuals()
-    
+
     # Analyze interventions
     analyzer = InterventionAnalyzer(
         residuals_path=residuals["combined_residuals"],
         current_raster=args.current,
         output_dir=args.output,
     )
-    
+
     priorities = analyzer.identify_priority_zones(save_geojson=True)
-    
-    logger.info(f"\n Analysis complete")
+
+    logger.info("\n Analysis complete")
     logger.info(f"Priority zones: {priorities['n_hotspot_zones']}")
     logger.info(f"Output: {args.output}")
 
