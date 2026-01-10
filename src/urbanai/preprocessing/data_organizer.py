@@ -1,7 +1,5 @@
 """
 Temporal Data Organization
-
-Orchestrates complete data preprocessing workflow.
 """
 
 import logging
@@ -18,15 +16,9 @@ class TemporalDataProcessor:
     """
     Complete temporal data processing orchestrator.
 
-    Handles:
-    1. Spectral indices calculation (NDBI, NDVI, NDWI, NDBSI, LST)
-    2. Tocantins Framework integration (IS, SS)
-    3. Temporal sequence organization
-
-    Args:
-        raw_dir: Directory with raw Landsat GeoTIFFs
-        output_dir: Directory for processed outputs
-        config: Processing configuration
+    Workflow:
+    1. Calculate spectral indices from RAW Landsat → features.tif
+    2. Calculate IS/SS from RAW Landsat → merge into features_complete.tif
     """
 
     def __init__(
@@ -47,9 +39,9 @@ class TemporalDataProcessor:
         )
 
         self.tocantins_processor = BatchTocantinsProcessor(
-            k_threshold=self.config.get("k_threshold", 1.5),
-            spatial_params=self.config.get("spatial_params"),
-            rf_params=self.config.get("rf_params"),
+            k_threshold=self.config.get("tocantins", {}).get("k_threshold", 1.5),
+            spatial_params=self.config.get("tocantins", {}).get("spatial_params"),
+            rf_params=self.config.get("tocantins", {}).get("rf_params"),
         )
 
         logger.info("TemporalDataProcessor initialized")
@@ -82,19 +74,12 @@ class TemporalDataProcessor:
 
         logger.info(f"Found {len(available_files)} raw files")
 
-        # Filter by years if specified
-        if years:
-            available_files = [
-                f for f in available_files
-                if self._extract_year(f.name) in years
-            ]
-            logger.info(f"Filtered to {len(available_files)} files for specified years")
-
-        # Step 1: Calculate spectral indices
+        # Step 1: Calculate spectral indices from RAW files
+        indices_dir = self.output_dir / "indices"
+        
         if calculate_indices:
-            logger.info("Step 1/2: Calculating spectral indices...")
+            logger.info("Step 1/2: Calculating spectral indices from RAW files...")
 
-            indices_dir = self.output_dir / "indices"
             indices_results = self.band_processor.process_time_series(
                 input_dir=self.raw_dir,
                 output_dir=indices_dir,
@@ -102,21 +87,19 @@ class TemporalDataProcessor:
             )
 
             logger.info(f"Processed {len(indices_results)} years")
+        else:
+            # If not calculating, assume they exist
+            if not indices_dir.exists():
+                raise ValueError("Indices directory doesn't exist and calculate_indices=False")
 
-        # Step 2: Calculate Tocantins scores
+        # Step 2: Calculate Tocantins scores from RAW files (not features!)
         if calculate_tocantins:
-            logger.info("Step 2/2: Calculating Tocantins scores...")
-
-            # Use indices as input for Tocantins
-            if calculate_indices:
-                tocantins_input = indices_dir
-            else:
-                tocantins_input = self.raw_dir
+            logger.info("Step 2/2: Calculating Tocantins scores from RAW files...")
 
             tocantins_results = self.tocantins_processor.process_time_series(
-                input_dir=tocantins_input,
+                raw_dir=self.raw_dir,           # ← RAW files for Tocantins
+                features_dir=indices_dir,        # ← Features to merge with
                 output_dir=self.output_dir,
-                pattern="*_features.tif",
                 save_intermediate=False,
             )
 
@@ -138,17 +121,7 @@ class TemporalDataProcessor:
         calculate_indices: bool = True,
         calculate_tocantins: bool = True,
     ) -> Path:
-        """
-        Process single year.
-
-        Args:
-            year: Year to process
-            calculate_indices: Calculate spectral indices
-            calculate_tocantins: Calculate IS and SS
-
-        Returns:
-            Path to output file
-        """
+        """Process single year."""
         results = self.process_all_years(
             years=[year],
             calculate_indices=calculate_indices,
@@ -161,12 +134,7 @@ class TemporalDataProcessor:
         return results[year]
 
     def validate_outputs(self) -> bool:
-        """
-        Validate all processed outputs.
-
-        Returns:
-            True if all outputs are valid
-        """
+        """Validate all processed outputs."""
         logger.info("Validating processed outputs...")
 
         output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
@@ -175,17 +143,14 @@ class TemporalDataProcessor:
             logger.error("No output files found")
             return False
 
-        # Check each file
         for file_path in output_files:
             try:
                 import rasterio
                 with rasterio.open(file_path) as src:
-                    # Check band count
                     if src.count != 7:
                         logger.error(f"Invalid band count in {file_path}: {src.count}")
                         return False
 
-                    # Check descriptions
                     expected = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
                     descriptions = src.descriptions or []
 
@@ -200,12 +165,7 @@ class TemporalDataProcessor:
         return True
 
     def get_temporal_statistics(self) -> Dict:
-        """
-        Get statistics about processed temporal data.
-
-        Returns:
-            Dictionary with temporal statistics
-        """
+        """Get statistics about processed temporal data."""
         output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
         years = [self._extract_year(f.name) for f in output_files]
 
@@ -219,7 +179,6 @@ class TemporalDataProcessor:
             "years": sorted(years),
         }
 
-        # Calculate temporal interval
         if len(years) >= 2:
             intervals = [years[i+1] - years[i] for i in range(len(years)-1)]
             stats["interval"] = min(intervals)
@@ -241,18 +200,20 @@ class TemporalDataProcessor:
         """Default processing configuration."""
         return {
             "landsat_version": 8,
-            "k_threshold": 1.5,
-            "spatial_params": {
-                "min_anomaly_size": 1,
-                "agglutination_distance": 4,
-                "morphology_kernel_size": 3,
-                "connectivity": 2,
-            },
-            "rf_params": {
-                "n_estimators": 200,
-                "max_depth": 25,
-                "min_samples_split": 8,
-                "min_samples_leaf": 4,
-                "random_state": 42,
+            "tocantins": {
+                "k_threshold": 1.5,
+                "spatial_params": {
+                    "min_anomaly_size": 1,
+                    "agglutination_distance": 4,
+                    "morphology_kernel_size": 3,
+                    "connectivity": 2,
+                },
+                "rf_params": {
+                    "n_estimators": 200,
+                    "max_depth": 25,
+                    "min_samples_split": 8,
+                    "min_samples_leaf": 4,
+                    "random_state": 42,
+                },
             },
         }
