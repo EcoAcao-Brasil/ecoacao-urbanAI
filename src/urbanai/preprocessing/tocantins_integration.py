@@ -1,14 +1,13 @@
 """
-Tocantins Framework Integration with Resume Support
+ Tocantins Framework Integration
 
 1. Tocantins processes RAW Landsat files, not feature files
-2. Batch processor tracks completed years
+2. Batch processor now tracks raw file paths
 3. Results are merged with existing feature files
 """
 
 import logging
 import re
-import json
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -47,7 +46,7 @@ class TocantinsIntegration:
 
     def calculate_scores(
         self,
-        raw_landsat_path: Path,
+        raw_landsat_path: Path,  # ← Changed parameter name for clarity
         output_dir: Optional[Path] = None,
         save_intermediate: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray, Dict]:
@@ -119,14 +118,14 @@ class TocantinsIntegration:
             height, width = classification_map.shape
             is_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Map IS values to pixel locations
             for _, row in feature_set.iterrows():
-                if "IS" in row:
-                    cy = int(row.get("Centroid_Row", 0))
-                    cx = int(row.get("Centroid_Col", 0))
-                    
-                    if 0 <= cy < height and 0 <= cx < width:
-                        is_raster[cy, cx] = row["IS"]
+                if "impact_score" in row and "pixels" in row:
+                    pixels = row["pixels"]
+                    if isinstance(pixels, list) and pixels:
+                        for pixel in pixels:
+                            y, x = pixel
+                            if 0 <= y < height and 0 <= x < width:
+                                is_raster[y, x] = row["impact_score"]
 
             if np.max(is_raster) == 0:
                 logger.warning("Tocantins: Impact Score calculation produced all zeros.")
@@ -155,14 +154,14 @@ class TocantinsIntegration:
             height, width = classification_map.shape
             ss_raster = np.zeros((height, width), dtype=np.float32)
 
-            # Map SS values
             for _, row in severity_df.iterrows():
-                if "SS" in row:
-                    cy = int(row.get("Centroid_Row", 0))
-                    cx = int(row.get("Centroid_Col", 0))
-                    
-                    if 0 <= cy < height and 0 <= cx < width:
-                        ss_raster[cy, cx] = row["SS"]
+                if "severity_score" in row and "core_pixels" in row:
+                    pixels = row["core_pixels"]
+                    if isinstance(pixels, list) and pixels:
+                        for pixel in pixels:
+                            y, x = pixel
+                            if 0 <= y < height and 0 <= x < width:
+                                ss_raster[y, x] = row["severity_score"]
 
             if np.max(ss_raster) == 0:
                 logger.warning("Tocantins: Severity Score calculation produced all zeros.")
@@ -219,9 +218,9 @@ class TocantinsIntegration:
 
 class BatchTocantinsProcessor:
     """
-    Process multiple rasters with Tocantins Framework and resume capability.
+    Process multiple rasters with Tocantins Framework.
     
-    CRITICAL: This processes RAW Landsat files, then merges
+    CRITICAL FIX: This now processes RAW Landsat files, then merges
     IS/SS scores with existing feature files.
     """
 
@@ -239,11 +238,10 @@ class BatchTocantinsProcessor:
 
     def process_time_series(
         self,
-        raw_dir: Path,
-        features_dir: Path,
+        raw_dir: Path,           # ← RAW Landsat directory
+        features_dir: Path,       # ← Processed features directory  
         output_dir: Path,
         save_intermediate: bool = False,
-        resume: bool = True,
     ) -> Dict[int, Tuple[np.ndarray, np.ndarray]]:
         """
         Process RAW Landsat files with Tocantins, then merge with features.
@@ -253,7 +251,6 @@ class BatchTocantinsProcessor:
             features_dir: Directory with processed feature rasters (*_features.tif)
             output_dir: Directory for final outputs
             save_intermediate: Save intermediate results
-            resume: Skip already-completed years
 
         Returns:
             Dictionary mapping year to (IS, SS) arrays
@@ -265,56 +262,33 @@ class BatchTocantinsProcessor:
         if not raw_files:
             raise ValueError(f"No RAW Landsat files (*_cropped.tif) found in {raw_dir}")
 
-        # Progress tracker
-        progress_file = output_dir / ".tocantins_progress.json"
-        completed_years = self._load_progress(progress_file) if resume else set()
-
         logger.info(f"Processing {len(raw_files)} RAW Landsat files with Tocantins Framework.")
-        if completed_years:
-            logger.info(f"Resuming: {len(completed_years)} years already processed")
 
         results = {}
         for raw_path in raw_files:
             year = self._extract_year(raw_path.name)
-
-            # Check if complete file already exists
-            complete_path = output_dir / f"{year}_features_complete.tif"
-            if resume and complete_path.exists() and year in completed_years:
-                logger.info(f"✓ Skipping {year} (already has complete features)")
-                results[year] = (None, None)
-                continue
-
-            logger.info(f"Processing Tocantins for {year}...")
+            logger.info(f"Processing year: {year}")
 
             # Calculate IS/SS from RAW file
             year_output_dir = output_dir / str(year) if save_intermediate else None
 
-            try:
-                is_raster, ss_raster, stats = self.integration.calculate_scores(
-                    raw_landsat_path=raw_path,
-                    output_dir=year_output_dir,
-                    save_intermediate=save_intermediate,
-                )
+            is_raster, ss_raster, stats = self.integration.calculate_scores(
+                raw_landsat_path=raw_path,
+                output_dir=year_output_dir,
+                save_intermediate=save_intermediate,
+            )
 
-                results[year] = (is_raster, ss_raster)
+            results[year] = (is_raster, ss_raster)
 
-                # Merge with existing features
-                feature_path = features_dir / f"{year}_features.tif"
-                if not feature_path.exists():
-                    logger.warning(f"Feature file not found: {feature_path}, skipping merge")
-                    continue
-
-                self._save_combined(
-                    feature_path, is_raster, ss_raster, output_dir, year
-                )
-
-                # Mark as completed
-                completed_years.add(year)
-                self._save_progress(progress_file, completed_years)
-
-            except Exception as e:
-                logger.error(f"Failed to process Tocantins for {year}: {e}")
+            # Merge with existing features
+            feature_path = features_dir / f"{year}_features.tif"
+            if not feature_path.exists():
+                logger.warning(f"Feature file not found: {feature_path}, skipping merge")
                 continue
+
+            self._save_combined(
+                feature_path, is_raster, ss_raster, output_dir, year
+            )
 
         logger.info(f"Completed Tocantins processing for {len(results)} years.")
         return results
@@ -347,24 +321,7 @@ class BatchTocantinsProcessor:
                 dst.write(band.astype(np.float32), i)
                 dst.set_band_description(i, desc)
 
-        logger.info(f"✓ Saved complete features: {output_path.name}")
-
-    def _load_progress(self, progress_file: Path) -> set:
-        """Load completed years from progress file."""
-        if not progress_file.exists():
-            return set()
-        
-        try:
-            with open(progress_file) as f:
-                data = json.load(f)
-                return set(data.get("completed_years", []))
-        except:
-            return set()
-
-    def _save_progress(self, progress_file: Path, completed_years: set) -> None:
-        """Save completed years to progress file."""
-        with open(progress_file, "w") as f:
-            json.dump({"completed_years": sorted(list(completed_years))}, f, indent=2)
+        logger.info(f"Saved complete features to: {output_path}")
 
     @staticmethod
     def _extract_year(filename: str) -> int:
