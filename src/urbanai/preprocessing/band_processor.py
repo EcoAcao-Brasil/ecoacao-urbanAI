@@ -2,17 +2,15 @@
 Band Processing and Spectral Indices Calculation
 
 Computes NDBI, NDVI, NDWI, NDBSI, and LST from Landsat bands.
-
-Band reading by description name + resume capability.
 """
 
 import logging
-import json
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import rasterio
+from rasterio.transform import Affine
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +19,62 @@ class BandProcessor:
     """
     Process Landsat bands and calculate spectral indices.
 
-    Handles Landsat 5/7/8/9 with automatic band detection by name.
+    Handles Landsat 5/7/8/9 with appropriate band mappings.
+
+    Args:
+        landsat_version: Landsat satellite version (5, 7, 8, or 9)
     """
 
+    # Band mappings for different Landsat versions
+    BAND_MAPPING = {
+        5: {  # Landsat 5 TM
+            "blue": "SR_B1",
+            "green": "SR_B2",
+            "red": "SR_B3",
+            "nir": "SR_B4",
+            "swir1": "SR_B5",
+            "thermal": "ST_B6",
+            "swir2": "SR_B7",
+        },
+        7: {  # Landsat 7 ETM+
+            "blue": "SR_B1",
+            "green": "SR_B2",
+            "red": "SR_B3",
+            "nir": "SR_B4",
+            "swir1": "SR_B5",
+            "thermal": "ST_B6",
+            "swir2": "SR_B7",
+        },
+        8: {  # Landsat 8 OLI/TIRS
+            "coastal": "SR_B1",
+            "blue": "SR_B2",
+            "green": "SR_B3",
+            "red": "SR_B4",
+            "nir": "SR_B5",
+            "swir1": "SR_B6",
+            "swir2": "SR_B7",
+            "thermal": "ST_B10",
+        },
+        9: {  # Landsat 9 OLI-2/TIRS-2
+            "coastal": "SR_B1",
+            "blue": "SR_B2",
+            "green": "SR_B3",
+            "red": "SR_B4",
+            "nir": "SR_B5",
+            "swir1": "SR_B6",
+            "swir2": "SR_B7",
+            "thermal": "ST_B10",
+        },
+    }
+
     def __init__(self, landsat_version: int = 8) -> None:
+        if landsat_version not in self.BAND_MAPPING:
+            raise ValueError(f"Unsupported Landsat version: {landsat_version}")
+
         self.landsat_version = landsat_version
-        logger.info(f"BandProcessor initialized (auto-detection enabled)")
+        self.band_map = self.BAND_MAPPING[landsat_version]
+
+        logger.info(f"BandProcessor initialized for Landsat {landsat_version}")
 
     def process_raster(
         self,
@@ -47,10 +95,10 @@ class BandProcessor:
         """
         logger.info(f"Processing: {input_path.name}")
 
-        # Read bands BY DESCRIPTION NAME (not position)
+        # Read bands
         with rasterio.open(input_path) as src:
             metadata = src.meta.copy()
-            bands = self._read_bands_by_name(src)
+            bands = self._read_bands(src)
 
         # Calculate indices
         results = {}
@@ -71,72 +119,33 @@ class BandProcessor:
         logger.info(f"Calculated {len(results)} indices")
         return results
 
-    def _read_bands_by_name(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
-        """
-        Read bands by DESCRIPTION name, not position.
-        
-        This is critical because GEE exports have QA bands interspersed,
-        so band positions vary between Landsat versions and exports.
-        """
+    def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
+        """Read required bands from raster with auto-detection."""
+        bands = {}
         descriptions = list(src.descriptions or [])
         
         if not descriptions:
             raise ValueError("Raster has no band descriptions")
         
-        logger.debug(f"Available bands: {descriptions}")
-        
-        bands = {}
-        
-        # Define flexible band mappings (handles both L5/7 and L8/9)
-        band_mappings = {
-            "blue": ["SR_B1", "SR_B2"],
-            "green": ["SR_B2", "SR_B3"],
-            "red": ["SR_B3", "SR_B4"],
-            "nir": ["SR_B4", "SR_B5"],
-            "swir1": ["SR_B5", "SR_B6", "SR_B7"],
-            "swir2": ["SR_B7"],
-            "thermal": ["ST_B6", "ST_B10"],
-        }
-        
-        # Detect Landsat version by checking which bands exist
-        if "SR_B6" in descriptions and "ST_B10" in descriptions:
-            # Landsat 8/9 format
-            band_mappings = {
-                "blue": ["SR_B2"],
-                "green": ["SR_B3"],
-                "red": ["SR_B4"],
-                "nir": ["SR_B5"],
-                "swir1": ["SR_B6"],
-                "swir2": ["SR_B7"],
-                "thermal": ["ST_B10"],
-            }
-            logger.debug("Detected Landsat 8/9 format")
+        # Auto-detect Landsat version from thermal band
+        if "ST_B6" in descriptions:
+            # Landsat 5/7
+            logger.debug("Detected Landsat 5/7 from ST_B6 thermal band")
+            band_map = self.BAND_MAPPING[5]
+        elif "ST_B10" in descriptions:
+            # Landsat 8/9
+            logger.debug("Detected Landsat 8/9 from ST_B10 thermal band")
+            band_map = self.BAND_MAPPING[8]
         else:
-            # Landsat 5/7 format
-            band_mappings = {
-                "blue": ["SR_B1"],
-                "green": ["SR_B2"],
-                "red": ["SR_B3"],
-                "nir": ["SR_B4"],
-                "swir1": ["SR_B5"],
-                "swir2": ["SR_B7"],
-                "thermal": ["ST_B6"],
-            }
-            logger.debug("Detected Landsat 5/7 format")
+            # Fallback to initialized version
+            logger.warning(f"Could not auto-detect Landsat version. Using configured: L{self.landsat_version}")
+            band_map = self.band_map
         
-        # Read each required band by searching for its name
-        for common_name, possible_names in band_mappings.items():
-            found = False
-            for band_name in possible_names:
-                if band_name in descriptions:
-                    band_idx = descriptions.index(band_name) + 1
-                    bands[common_name] = src.read(band_idx).astype(np.float32)
-                    logger.debug(f"  {common_name} → {band_name} (band {band_idx})")
-                    found = True
-                    break
-            
-            if not found:
-                logger.warning(f"Could not find band for {common_name}")
+        # Read bands using detected mapping
+        for common_name, band_name in band_map.items():
+            if band_name in descriptions:
+                band_idx = descriptions.index(band_name) + 1
+                bands[common_name] = src.read(band_idx).astype(np.float32)
         
         # Validate required bands are present
         required = ["red", "nir", "swir1", "thermal", "blue", "green"]
@@ -144,8 +153,8 @@ class BandProcessor:
         if missing:
             raise ValueError(
                 f"Missing required bands: {missing}\n"
-                f"Available bands: {descriptions}\n"
-                f"Band mappings used: {band_mappings}"
+                f"Available bands in file: {descriptions}\n"
+                f"Looking for: {list(band_map.values())}"
             )
         
         return bands
@@ -270,7 +279,7 @@ class BandProcessor:
 
 class MultiTemporalProcessor:
     """
-    Process multiple temporal rasters in sequence with resume capability.
+    Process multiple temporal rasters in sequence.
 
     Handles batch processing of time series data.
     """
@@ -283,16 +292,14 @@ class MultiTemporalProcessor:
         input_dir: Path,
         output_dir: Path,
         pattern: str = "*.tif",
-        resume: bool = True,
     ) -> Dict[int, Path]:
         """
-        Process all rasters in directory with resume support.
+        Process all rasters in directory.
 
         Args:
             input_dir: Directory with input GeoTIFFs
             output_dir: Directory for processed outputs
             pattern: Filename pattern for inputs
-            resume: Skip already-processed years
 
         Returns:
             Dictionary mapping year to output path
@@ -303,65 +310,25 @@ class MultiTemporalProcessor:
         if not input_files:
             raise ValueError(f"No files matching {pattern} in {input_dir}")
 
-        # Create progress tracker
-        progress_file = output_dir / ".processing_progress.json"
-        completed_years = self._load_progress(progress_file) if resume else set()
-
         logger.info(f"Processing {len(input_files)} rasters")
-        if completed_years:
-            logger.info(f"Resuming: {len(completed_years)} years already processed")
 
         results = {}
         for input_path in input_files:
             # Extract year from filename
             year = self._extract_year(input_path.name)
+
+            # Process
             output_path = output_dir / f"{year}_features.tif"
+            self.processor.process_raster(
+                input_path=input_path,
+                output_path=output_path,
+                calculate_all=True,
+            )
 
-            # Skip if already processed
-            if resume and year in completed_years and output_path.exists():
-                logger.info(f"✓ Skipping {year} (already processed)")
-                results[year] = output_path
-                continue
-
-            # Process this year
-            logger.info(f"Processing {year}...")
-            
-            try:
-                self.processor.process_raster(
-                    input_path=input_path,
-                    output_path=output_path,
-                    calculate_all=True,
-                )
-
-                results[year] = output_path
-                
-                # Mark as completed
-                completed_years.add(year)
-                self._save_progress(progress_file, completed_years)
-                
-            except Exception as e:
-                logger.error(f"Failed to process {year}: {e}")
-                continue
+            results[year] = output_path
 
         logger.info(f"Processed {len(results)} temporal rasters")
         return results
-
-    def _load_progress(self, progress_file: Path) -> set:
-        """Load completed years from progress file."""
-        if not progress_file.exists():
-            return set()
-        
-        try:
-            with open(progress_file) as f:
-                data = json.load(f)
-                return set(data.get("completed_years", []))
-        except:
-            return set()
-
-    def _save_progress(self, progress_file: Path, completed_years: set) -> None:
-        """Save completed years to progress file."""
-        with open(progress_file, "w") as f:
-            json.dump({"completed_years": sorted(list(completed_years))}, f, indent=2)
 
     @staticmethod
     def _extract_year(filename: str) -> int:
