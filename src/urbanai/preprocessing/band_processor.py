@@ -6,75 +6,57 @@ Computes NDBI, NDVI, NDWI, NDBSI, and LST from Landsat bands.
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
 import rasterio
-from rasterio.transform import Affine
 
 logger = logging.getLogger(__name__)
 
 
 class BandProcessor:
     """
-    Process Landsat bands and calculate spectral indices.
+    Process Landsat bands with explicit user-defined band mapping.
 
-    Handles Landsat 5/7/8/9 with appropriate band mappings.
+    This class does not perform automatic band detection. Users must specify
+    which band descriptions in their GeoTIFF files correspond to the required
+    spectral bands.
 
     Args:
-        landsat_version: Landsat satellite version (5, 7, 8, or 9)
+        band_mapping: Dictionary mapping common band names to actual band descriptions.
+            Required keys: 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'thermal'
+
+    Raises:
+        ValueError: If band_mapping is missing required keys.
+
+    Examples:
+        >>> # Landsat 5 configuration
+        >>> processor = BandProcessor({
+        ...     'blue': 'SR_B2',
+        ...     'green': 'SR_B3',
+        ...     'red': 'SR_B4',
+        ...     'nir': 'SR_B4',
+        ...     'swir1': 'SR_B5',
+        ...     'swir2': 'SR_B7',
+        ...     'thermal': 'ST_B6'
+        ... })
     """
 
-    # Band mappings for different Landsat versions
-    BAND_MAPPING = {
-        5: {  # Landsat 5 TM
-            "blue": "SR_B1",
-            "green": "SR_B2",
-            "red": "SR_B3",
-            "nir": "SR_B4",
-            "swir1": "SR_B5",
-            "thermal": "ST_B6",
-            "swir2": "SR_B7",
-        },
-        7: {  # Landsat 7 ETM+
-            "blue": "SR_B1",
-            "green": "SR_B2",
-            "red": "SR_B3",
-            "nir": "SR_B4",
-            "swir1": "SR_B5",
-            "thermal": "ST_B6",
-            "swir2": "SR_B7",
-        },
-        8: {  # Landsat 8 OLI/TIRS
-            "coastal": "SR_B1",
-            "blue": "SR_B2",
-            "green": "SR_B3",
-            "red": "SR_B4",
-            "nir": "SR_B5",
-            "swir1": "SR_B6",
-            "swir2": "SR_B7",
-            "thermal": "ST_B10",
-        },
-        9: {  # Landsat 9 OLI-2/TIRS-2
-            "coastal": "SR_B1",
-            "blue": "SR_B2",
-            "green": "SR_B3",
-            "red": "SR_B4",
-            "nir": "SR_B5",
-            "swir1": "SR_B6",
-            "swir2": "SR_B7",
-            "thermal": "ST_B10",
-        },
-    }
+    REQUIRED_BANDS = ["blue", "green", "red", "nir", "swir1", "swir2", "thermal"]
 
-    def __init__(self, landsat_version: int = 8) -> None:
-        if landsat_version not in self.BAND_MAPPING:
-            raise ValueError(f"Unsupported Landsat version: {landsat_version}")
+    def __init__(self, band_mapping: Dict[str, str]) -> None:
+        missing = [b for b in self.REQUIRED_BANDS if b not in band_mapping]
 
-        self.landsat_version = landsat_version
-        self.band_map = self.BAND_MAPPING[landsat_version]
+        if missing:
+            raise ValueError(
+                f"Missing required bands in mapping: {missing}. "
+                f"Required bands: {self.REQUIRED_BANDS}"
+            )
 
-        logger.info(f"BandProcessor initialized for Landsat {landsat_version}")
+        self.band_mapping = band_mapping
+        logger.info("BandProcessor initialized with user-defined mapping")
+        for common, actual in band_mapping.items():
+            logger.debug(f"  {common}: {actual}")
 
     def process_raster(
         self,
@@ -83,17 +65,18 @@ class BandProcessor:
         calculate_all: bool = True,
     ) -> Dict[str, np.ndarray]:
         """
-        Process Landsat raster and calculate all indices.
+        Process Landsat raster and calculate spectral indices.
 
         Args:
-            input_path: Path to input GeoTIFF
-            output_path: Path to save processed output (optional)
-            calculate_all: Calculate all indices
+            input_path: Path to input GeoTIFF file.
+            output_path: Path to save processed indices. If None, no file is saved.
+            calculate_all: Whether to calculate all indices.
 
         Returns:
-            Dictionary of calculated indices
+            Dictionary with keys 'NDBI', 'NDVI', 'NDWI', 'NDBSI', 'LST'
+            mapping to numpy arrays.
         """
-        logger.info(f"Processing: {input_path.name}")
+        logger.info(f"Processing raster: {input_path.name}")
 
         # Read bands
         with rasterio.open(input_path) as src:
@@ -104,7 +87,9 @@ class BandProcessor:
         results = {}
 
         if calculate_all:
-            results["NDBI"] = self.calculate_ndbi(bands["red"], bands["swir1"], bands["nir"])
+            results["NDBI"] = self.calculate_ndbi(
+                bands["red"], bands["swir1"], bands["nir"]
+            )
             results["NDVI"] = self.calculate_ndvi(bands["red"], bands["nir"])
             results["NDWI"] = self.calculate_ndwi(bands["green"], bands["nir"])
             results["NDBSI"] = self.calculate_ndbsi(
@@ -120,44 +105,64 @@ class BandProcessor:
         return results
 
     def _read_bands(self, src: rasterio.DatasetReader) -> Dict[str, np.ndarray]:
-        """Read required bands from raster with auto-detection."""
-        bands = {}
+        """
+        Read bands from raster using user-defined mapping.
+
+        Validates that mapped descriptions exist in the source file and checks
+        thermal band ranges.
+        """
         descriptions = list(src.descriptions or [])
-        
+
         if not descriptions:
-            raise ValueError("Raster has no band descriptions")
-        
-        # Auto-detect Landsat version from thermal band
-        if "ST_B6" in descriptions:
-            # Landsat 5/7
-            logger.debug("Detected Landsat 5/7 from ST_B6 thermal band")
-            band_map = self.BAND_MAPPING[5]
-        elif "ST_B10" in descriptions:
-            # Landsat 8/9
-            logger.debug("Detected Landsat 8/9 from ST_B10 thermal band")
-            band_map = self.BAND_MAPPING[8]
-        else:
-            # Fallback to initialized version
-            logger.warning(f"Could not auto-detect Landsat version. Using configured: L{self.landsat_version}")
-            band_map = self.band_map
-        
-        # Read bands using detected mapping
-        for common_name, band_name in band_map.items():
-            if band_name in descriptions:
-                band_idx = descriptions.index(band_name) + 1
-                bands[common_name] = src.read(band_idx).astype(np.float32)
-        
-        # Validate required bands are present
-        required = ["red", "nir", "swir1", "thermal", "blue", "green"]
-        missing = [b for b in required if b not in bands]
-        if missing:
-            raise ValueError(
-                f"Missing required bands: {missing}\n"
-                f"Available bands in file: {descriptions}\n"
-                f"Looking for: {list(band_map.values())}"
-            )
-        
+            raise ValueError("Raster contains no band descriptions")
+
+        logger.debug(f"Available bands in raster: {descriptions}")
+
+        bands = {}
+
+        for common_name, band_name in self.band_mapping.items():
+            if band_name not in descriptions:
+                raise ValueError(
+                    f"Band '{band_name}' (mapped to '{common_name}') not found. "
+                    f"Available bands: {descriptions}"
+                )
+
+            band_idx = descriptions.index(band_name) + 1
+            bands[common_name] = src.read(band_idx).astype(np.float32)
+
+            logger.debug(f"Read {common_name}: {band_name} at index {band_idx}")
+
+        self._validate_thermal(bands["thermal"], self.band_mapping["thermal"])
+
         return bands
+
+    def _validate_thermal(self, thermal_data: np.ndarray, thermal_name: str) -> None:
+        """
+        Validate thermal band data ranges.
+
+        Logs warnings if thermal data appears to be outside expected ranges
+        (either Kelvin or DN).
+        """
+        thermal_min = np.nanmin(thermal_data)
+        thermal_max = np.nanmax(thermal_data)
+        thermal_mean = np.nanmean(thermal_data)
+
+        logger.debug(f"Thermal band ({thermal_name}) statistics:")
+        logger.debug(f"  Range: [{thermal_min:.2f}, {thermal_max:.2f}]")
+        logger.debug(f"  Mean: {thermal_mean:.2f}")
+
+        if thermal_max < 100:
+            logger.warning(
+                f"Thermal band maximum ({thermal_max:.2f}) is unusually low. "
+                f"Expected range: 250-350 (Kelvin) or 10000-15000 (DN). "
+                f"Verify correct band is mapped to 'thermal'."
+            )
+        elif thermal_max > 20000:
+            logger.warning(
+                f"Thermal band maximum ({thermal_max:.2f}) is unusually high. "
+                f"Expected range: 250-350 (Kelvin) or 10000-15000 (DN). "
+                f"Verify correct band is mapped to 'thermal'."
+            )
 
     @staticmethod
     def calculate_ndbi(
@@ -227,18 +232,20 @@ class BandProcessor:
         return ndbsi
 
     @staticmethod
-    def calculate_lst(thermal: np.ndarray, kelvin_to_celsius: bool = True) -> np.ndarray:
+    def calculate_lst(
+        thermal: np.ndarray, kelvin_to_celsius: bool = True
+    ) -> np.ndarray:
         """
-        Calculate Land Surface Temperature.
+        Calculate Land Surface Temperature from thermal band.
 
-        Assumes thermal band is in Kelvin (after scale factor application).
+        Assumes thermal band is in Kelvin after USGS Collection 2 scaling.
 
         Args:
-            thermal: Thermal band in Kelvin
-            kelvin_to_celsius: Convert to Celsius
+            thermal: Thermal band in Kelvin.
+            kelvin_to_celsius: Whether to convert output to Celsius.
 
         Returns:
-            LST in Celsius or Kelvin
+            Land Surface Temperature in Celsius or Kelvin.
         """
         lst = thermal.copy()
 
@@ -274,18 +281,21 @@ class BandProcessor:
                 dst.write(data.astype(np.float32), i)
                 dst.set_band_description(i, name)
 
-        logger.info(f"Saved indices: {output_path}")
+        logger.info(f"Saved indices to: {output_path}")
 
 
 class MultiTemporalProcessor:
     """
     Process multiple temporal rasters in sequence.
 
-    Handles batch processing of time series data.
+    Handles batch processing of time series data using a consistent band mapping.
+
+    Args:
+        band_mapping: Band mapping to use for all rasters in the time series.
     """
 
-    def __init__(self, landsat_version: int = 8) -> None:
-        self.processor = BandProcessor(landsat_version=landsat_version)
+    def __init__(self, band_mapping: Dict[str, str]) -> None:
+        self.processor = BandProcessor(band_mapping=band_mapping)
 
     def process_time_series(
         self,
@@ -297,12 +307,12 @@ class MultiTemporalProcessor:
         Process all rasters in directory.
 
         Args:
-            input_dir: Directory with input GeoTIFFs
-            output_dir: Directory for processed outputs
-            pattern: Filename pattern for inputs
+            input_dir: Directory containing input GeoTIFF files.
+            output_dir: Directory for processed outputs.
+            pattern: Filename pattern for input files.
 
         Returns:
-            Dictionary mapping year to output path
+            Dictionary mapping year to output file path.
         """
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -335,7 +345,7 @@ class MultiTemporalProcessor:
         """Extract year from filename."""
         import re
 
-        # Match YYYY in filename (e.g., L8_GeoTIFF_2023-07-01_2023-12-31_cropped.tif)
+        # Match YYYY in filename
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
