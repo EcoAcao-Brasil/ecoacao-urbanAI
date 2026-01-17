@@ -33,10 +33,12 @@ class TocantinsIntegration:
 
     def __init__(
         self,
+        band_mapping: Optional[Dict[str, str]] = None,
         k_threshold: float = 1.5,
         spatial_params: Optional[Dict] = None,
         rf_params: Optional[Dict] = None,
     ) -> None:
+        self.band_mapping = band_mapping
         self.k_threshold = k_threshold
         self.spatial_params = spatial_params or self._default_spatial_params()
         self.rf_params = rf_params or self._default_rf_params()
@@ -72,6 +74,7 @@ class TocantinsIntegration:
             k_threshold=self.k_threshold,
             spatial_params=self.spatial_params,
             rf_params=self.rf_params,
+            band_mapping=self.band_mapping
         )
 
         try:
