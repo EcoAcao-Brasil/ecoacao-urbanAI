@@ -207,13 +207,65 @@ The Tocantins Framework requires **RAW Landsat GeoTIFF files** with all original
 
 Both processors work on the same RAW input files in parallel, then results are merged.
 
+### Tocantins Framework: Two Workflows
+
+UrbanAI supports **two workflows** for the Tocantins Framework (IS/SS metrics):
+
+#### Workflow A: Calculate IS/SS for Every Year (Default with `enabled: true`)
+
+```yaml
+preprocessing:
+  tocantins:
+    enabled: true  # Calculate IS/SS for 1985, 1987, ..., 2025
+
+model:
+  # Auto-configured to 7 channels based on tocantins.enabled
+  input_channels: 7  # NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
+  output_channels: 7
+```
+
+**Use case**: When you need IS/SS as **training features** for spatiotemporal learning. The model learns from historical IS/SS patterns to predict future thermal anomalies.
+
+**Output files**: `YYYY_features_complete.tif` (7 bands)
+
+#### Workflow B: Skip IS/SS During Training
+
+```yaml
+preprocessing:
+  tocantins:
+    enabled: false  # Skip IS/SS calculation during preprocessing
+
+model:
+  # Auto-configured to 5 channels based on tocantins.enabled
+  input_channels: 5  # NDBI, NDVI, NDWI, NDBSI, LST
+  output_channels: 5
+```
+
+**Use case**: Train faster with only spectral indices, then calculate IS/SS **only on the final prediction** (e.g., 2035) using external scripts or the [Tocantins Framework](https://github.com/EcoAcao-Brasil/tocantins-framework) directly.
+
+**Output files**: `YYYY_features.tif` (5 bands)
+
+**Note**: After prediction, you can calculate IS/SS on the predicted raster using the Tocantins Framework independently.
+
+#### Key Differences
+
+| Aspect | Workflow A (enabled=true) | Workflow B (enabled=false) |
+|--------|---------------------------|----------------------------|
+| **Preprocessing Time** | Slower (IS/SS for all years) | Faster (spectral indices only) |
+| **Model Channels** | 7 (includes IS/SS) | 5 (spectral only) |
+| **Training Features** | Temporal IS/SS patterns | Spectral patterns only |
+| **Analysis Weights** | LST: 0.4, IS: 0.3, SS: 0.2, NDBI: 0.1 | LST: 0.5, NDVI: 0.3, NDBI: 0.2 |
+| **Use Case** | Learn from anomaly patterns | Focus on spectral evolution |
+
 ### Model Architecture
 
 ```python
 ConvLSTM Encoder-Decoder:
   Input: (batch, time_steps, channels, height, width)
   - time_steps: Configurable based on your data (e.g., 10-20 timesteps)
-  - channels: 7 (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
+  - channels: 5 or 7 (auto-configured based on tocantins.enabled)
+      * 5 channels: NDBI, NDVI, NDWI, NDBSI, LST
+      * 7 channels: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
   
   Encoder:
     - ConvLSTM Layer 1: 64 filters
@@ -224,8 +276,10 @@ ConvLSTM Encoder-Decoder:
     - ConvLSTM Layer 4: 256 filters
     - ConvLSTM Layer 5: 128 filters
     - ConvLSTM Layer 6: 64 filters
-    - Conv2D Output: 7 channels (predicted metrics)
+    - Conv2D Output: 5 or 7 channels (predicted metrics)
 ```
+
+**Note**: The model architecture automatically adapts to the number of input channels based on your `preprocessing.tocantins.enabled` setting.
 
 ---
 
