@@ -273,12 +273,12 @@ class UrbanAITrainer:
         model_config = self.config.get("model", {})
 
         model = ConvLSTMEncoderDecoder(
-            input_channels=model_config.get("input_channels", 7),
+            input_channels=model_config.get("input_channels", 5),
             hidden_dims=model_config.get("hidden_dims", [64, 128, 256, 256, 128, 64]),
             kernel_size=(model_config.get("kernel_size", 3), model_config.get("kernel_size", 3)),
             num_encoder_layers=model_config.get("num_encoder_layers", 3),
             num_decoder_layers=model_config.get("num_decoder_layers", 3),
-            output_channels=model_config.get("output_channels", 7),
+            output_channels=model_config.get("output_channels", 5),
         )
 
         return model
@@ -313,11 +313,11 @@ class UrbanAITrainer:
                 "normalization_method": "zscore"
             },
             "model": {
-                "input_channels": 7,
+                "input_channels": 5,  # Default to 5 (no Tocantins)
                 "hidden_dims": [64, 128, 256, 256, 128, 64],
                 "kernel_size": 3,
                 "num_encoder_layers": 3,
                 "num_decoder_layers": 3,
-                "output_channels": 7,
+                "output_channels": 5,  # Default to 5 (no Tocantins)
             },
         }

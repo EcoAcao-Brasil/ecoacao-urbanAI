@@ -28,12 +28,7 @@ class FuturePredictor:
 
     Implements autoregressive prediction for multi-step forecasting and 
     Monte Carlo Dropout for uncertainty estimation.
-
-    Attributes:
-        BAND_NAMES (List[str]): Standard ordering of spectral/heat bands.
     """
-
-    BAND_NAMES = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
 
     def __init__(
         self,
@@ -62,8 +57,13 @@ class FuturePredictor:
         # Initialization
         self.model, self.config, self.norm_stats, self.norm_method = self._load_model()
         self.model.eval()
+        
+        # Determine band names based on model configuration
+        self.band_names = self._get_band_names()
 
         logger.info(f"FuturePredictor ready on {self.device}")
+        logger.info(f"Model channels: {self.config.get('model', {}).get('input_channels', 5)}")
+        logger.info(f"Band names: {self.band_names}")
         logger.info(f"Normalization: {self.norm_method.upper() if self.norm_stats else 'DISABLED'}")
 
     def predict(
@@ -129,6 +129,20 @@ class FuturePredictor:
         logger.info(f"Prediction task complete for {target_year}")
         return result_meta
 
+    def _get_band_names(self) -> list:
+        """
+        Get band names based on model configuration.
+        
+        Returns:
+            List of band names matching the model's channel count
+        """
+        n_channels = self.config.get("model", {}).get("input_channels", 5)
+        base_bands = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
+        
+        if n_channels == 7:
+            return base_bands + ["IS", "SS"]
+        return base_bands
+
     def _load_model(self) -> Tuple[nn.Module, Dict, Optional[Dict], str]:
         """Load checkpoint, configuration, and normalization stats."""
         logger.info(f"Loading checkpoint: {self.model_path.name}")
@@ -150,14 +164,14 @@ class FuturePredictor:
         else:
             logger.warning("⚠️ Checkpoint lacks normalization stats. Predictions may be unscaled.")
 
-        # Initialize Model
+        # Initialize Model - use 5 as default for backward compatibility
         model = ConvLSTMEncoderDecoder(
-            input_channels=model_config.get("input_channels", 7),
+            input_channels=model_config.get("input_channels", 5),
             hidden_dims=model_config.get("hidden_dims", [64, 128, 256, 256, 128, 64]),
             kernel_size=model_config.get("kernel_size", 3),
             num_encoder_layers=model_config.get("num_encoder_layers", 3),
             num_decoder_layers=model_config.get("num_decoder_layers", 3),
-            output_channels=model_config.get("output_channels", 7),
+            output_channels=model_config.get("output_channels", 5),
         )
         
         model.load_state_dict(checkpoint["model_state_dict"])
@@ -355,7 +369,7 @@ class FuturePredictor:
         # Save Prediction
         with rasterio.open(out_path, "w", **meta) as dst:
             dst.write(pred.astype(np.float32))
-            for i, name in enumerate(self.BAND_NAMES, start=1):
+            for i, name in enumerate(self.band_names, start=1):
                 dst.set_band_description(i, name)
 
         # Save Uncertainty (if exists)
@@ -396,7 +410,7 @@ class FuturePredictor:
     def _calculate_prediction_stats(self, prediction: np.ndarray) -> Dict[str, Dict[str, float]]:
         """Compute basic descriptive statistics for the prediction."""
         stats = {}
-        for i, name in enumerate(self.BAND_NAMES):
+        for i, name in enumerate(self.band_names):
             band_data = prediction[i]
             stats[name] = {
                 "min": float(np.min(band_data)),

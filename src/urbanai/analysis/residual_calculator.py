@@ -54,13 +54,11 @@ class ResidualCalculator:
         self.output_dir = Path(output_dir) if output_dir else Path("residuals")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # Set default weights if not provided
-        self.weights = weights or {
-            "LST": 0.4,
-            "IS": 0.3,
-            "SS": 0.2,
-            "NDBI": 0.1,
-        }
+        # Determine default weights based on available bands
+        if weights is None:
+            self.weights = self._get_default_weights()
+        else:
+            self.weights = weights
 
         # Validate weights
         self._validate_weights()
@@ -69,6 +67,46 @@ class ResidualCalculator:
         logger.info(f"Current: {self.current_raster.name}")
         logger.info(f"Future: {self.future_raster.name}")
         logger.info(f"Using priority weights: {self.weights}")
+
+    def _get_default_weights(self) -> Dict[str, float]:
+        """
+        Determine default weights based on available bands in the raster.
+        
+        Returns:
+            Default weights dictionary appropriate for the raster's band count
+        """
+        try:
+            import rasterio
+            with rasterio.open(self.current_raster) as src:
+                descriptions = src.descriptions or []
+                band_count = src.count
+                
+            # Check if IS and SS bands are present
+            has_tocantins = "IS" in descriptions and "SS" in descriptions
+            
+            if has_tocantins or band_count == 7:
+                # Default weights with Tocantins metrics
+                return {
+                    "LST": 0.4,
+                    "IS": 0.3,
+                    "SS": 0.2,
+                    "NDBI": 0.1,
+                }
+            else:
+                # Default weights without Tocantins metrics
+                return {
+                    "LST": 0.5,
+                    "NDVI": 0.3,
+                    "NDBI": 0.2,
+                }
+        except Exception as e:
+            logger.warning(f"Could not determine band count from raster: {e}")
+            # Fall back to non-Tocantins weights as safer default
+            return {
+                "LST": 0.5,
+                "NDVI": 0.3,
+                "NDBI": 0.2,
+            }
 
     def _validate_weights(self) -> None:
         """Validate that weights are positive numbers."""
