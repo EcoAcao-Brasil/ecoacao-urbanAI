@@ -153,7 +153,7 @@ class UrbanAIPipeline:
         processor.process_all_years(
             years=years,
             calculate_indices=True,
-            calculate_tocantins=True,
+            calculate_tocantins=self.config["preprocessing"]["tocantins"].get("enabled", False)
         )
 
         logger.info(f"Preprocessing complete: {processed_dir}")
