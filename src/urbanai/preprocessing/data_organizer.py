@@ -34,8 +34,10 @@ class TemporalDataProcessor:
         self.config = config or self._default_config()
 
         # Initialize processors
+        landsat_version = self.config.get("landsat_version", 8)
+        band_mapping = self._get_band_mapping(landsat_version)
         self.band_processor = MultiTemporalProcessor(
-            landsat_version=self.config.get("landsat_version", 8)
+            band_mapping=band_mapping
         )
 
         self.tocantins_processor = BatchTocantinsProcessor(
@@ -222,6 +224,43 @@ class TemporalDataProcessor:
         if match:
             return int(match.group(1))
         raise ValueError(f"Could not extract year from: {filename}")
+
+    @staticmethod
+    def _get_band_mapping(landsat_version: int) -> Dict[str, str]:
+        """
+        Get band mapping for specified Landsat version.
+        
+        Args:
+            landsat_version: Landsat satellite version (5 or 8)
+            
+        Returns:
+            Dictionary mapping common band names to Landsat band descriptions
+        """
+        if landsat_version == 8:
+            return {
+                "blue": "SR_B2",
+                "green": "SR_B3",
+                "red": "SR_B4",
+                "nir": "SR_B5",
+                "swir1": "SR_B6",
+                "swir2": "SR_B7",
+                "thermal": "ST_B10"
+            }
+        elif landsat_version == 5:
+            return {
+                "blue": "SR_B1",
+                "green": "SR_B2",
+                "red": "SR_B3",
+                "nir": "SR_B4",
+                "swir1": "SR_B5",
+                "swir2": "SR_B7",
+                "thermal": "ST_B6"
+            }
+        else:
+            raise ValueError(
+                f"Unsupported Landsat version: {landsat_version}. "
+                f"Supported versions: 5, 8"
+            )
 
     @staticmethod
     def _default_config() -> Dict:
