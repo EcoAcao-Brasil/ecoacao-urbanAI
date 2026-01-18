@@ -15,6 +15,7 @@ from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
 from urbanai.prediction import FuturePredictor
 from urbanai.preprocessing import TemporalDataProcessor
 from urbanai.training import UrbanAITrainer
+from urbanai.utils.config import get_input_channels
 from urbanai.utils.logging import setup_logger
 from urbanai.visualization import MapGenerator
 
@@ -43,16 +44,29 @@ class UrbanAIPipeline:
         setup_logger(log_file=self.output_dir / "pipeline.log", verbose=verbose)
 
         self.config = self._load_config(config)
+        
+        # Auto-configure input channels based on Tocantins setting
+        if "model" not in self.config:
+            self.config["model"] = {}
+        
+        # Only override if not explicitly set by user
+        if "input_channels" not in self.config.get("model", {}):
+            self.config["model"]["input_channels"] = get_input_channels(self.config)
+            self.config["model"]["output_channels"] = get_input_channels(self.config)
+        
         self.device = self._setup_device(device)
 
         # State tracking for results that are passed between steps
         self._predictions: Optional[Dict[str, Any]] = None
         self._intervention_priorities: Optional[Dict[str, Any]] = None
 
+        tocantins_status = "enabled" if self.config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False) else "disabled"
         logger.info("UrbanAI Pipeline initialized")
         logger.info(f"Input: {self.input_dir}")
         logger.info(f"Output: {self.output_dir}")
         logger.info(f"Device: {self.device}")
+        logger.info(f"Tocantins Framework: {tocantins_status}")
+        logger.info(f"Model channels: {self.config['model']['input_channels']}")
 
     def run(
         self,
@@ -369,6 +383,9 @@ class UrbanAIPipeline:
                 "start_year": 1985,
                 "end_year": 2023,  # Changed from 2025 to avoid assumptions
                 "interval": 2,
+                "tocantins": {
+                    "enabled": False,  # Disabled by default for safety
+                },
             },
             "training": {
                 "epochs": 100,
@@ -378,7 +395,7 @@ class UrbanAIPipeline:
                 "early_stopping": {"patience": 15},
             },
             "model": {
-                "input_channels": 7,
+                "input_channels": 5,  # Will be auto-configured based on tocantins.enabled
                 "hidden_dims": [64, 128, 256, 256, 128, 64],
                 "kernel_size": 3,
                 "num_encoder_layers": 3,

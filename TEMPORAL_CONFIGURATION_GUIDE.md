@@ -58,7 +58,75 @@ preprocessing:
   start_year: 2000  # Detected minimum year
   end_year: 2022    # Detected maximum year
   interval: 2       # 1 for annual, 2 for biennial
+  
+  # Tocantins Framework configuration (optional)
+  tocantins:
+    enabled: false  # Set to true to calculate IS/SS metrics
 ```
+
+## Tocantins Framework Configuration
+
+The Tocantins Framework provides thermal anomaly metrics (Impact Score and Severity Score). This section is **optional** and can be enabled or disabled based on your research needs.
+
+### When to Enable Tocantins
+
+**Enable (`enabled: true`)** when:
+- You want the model to learn from temporal thermal anomaly patterns
+- You have sufficient computational resources for IS/SS calculation across all years
+- Your research focuses on intra-urban thermal anomaly evolution
+- You need IS/SS metrics for intervention priority analysis
+
+**Disable (`enabled: false`)** when:
+- You want faster preprocessing (spectral indices only)
+- You plan to calculate IS/SS only on the final prediction
+- Your research focuses on spectral indices evolution
+- Computational resources are limited
+
+### Configuration Options
+
+```yaml
+preprocessing:
+  tocantins:
+    enabled: true  # Enable/disable IS/SS calculation
+    k_threshold: 1.5  # Z-score threshold for anomaly detection
+    spatial_params:
+      min_anomaly_size: 1  # Minimum pixels for valid anomaly
+      agglutination_distance: 4  # Distance for merging nearby anomalies
+      morphology_kernel_size: 3  # Kernel size for morphological operations
+      connectivity: 2  # Connectivity for component labeling
+    rf_params:
+      n_estimators: 200  # Random Forest trees for classification
+      max_depth: 25  # Maximum tree depth
+      min_samples_split: 8  # Minimum samples to split node
+      min_samples_leaf: 4  # Minimum samples in leaf
+      random_state: 42  # Reproducibility seed
+```
+
+### Impact on Model Architecture
+
+The `tocantins.enabled` setting automatically configures model channels:
+
+```yaml
+# With Tocantins enabled
+preprocessing:
+  tocantins:
+    enabled: true
+
+model:
+  input_channels: 7  # Auto-configured: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
+  output_channels: 7
+
+# With Tocantins disabled
+preprocessing:
+  tocantins:
+    enabled: false
+
+model:
+  input_channels: 5  # Auto-configured: NDBI, NDVI, NDWI, NDBSI, LST
+  output_channels: 5
+```
+
+**Note**: You do not need to manually set `input_channels` or `output_channels` - they are automatically determined from `tocantins.enabled`.
 
 ## Training Parameter Configuration
 

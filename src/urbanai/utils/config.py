@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -45,10 +45,13 @@ class Config:
                 "end_year": 2025,
                 "interval": 2,
                 "season": "07-01_12-31",
+                "tocantins": {
+                    "enabled": False,  # Disabled by default for safety
+                },
             },
             "model": {
                 "architecture": "convlstm",
-                "input_channels": 7,
+                "input_channels": 5,  # Will be auto-configured based on tocantins.enabled
                 "hidden_dims": [64, 128, 256, 256, 128, 64],
                 "kernel_size": 3,
             },
@@ -58,3 +61,36 @@ class Config:
                 "learning_rate": 0.001,
             },
         }
+
+
+def get_input_channels(config: Dict[str, Any]) -> int:
+    """
+    Determine the number of input channels based on configuration.
+    
+    Args:
+        config: Configuration dictionary
+    
+    Returns:
+        7 if Tocantins is enabled (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
+        5 if Tocantins is disabled (NDBI, NDVI, NDWI, NDBSI, LST)
+    """
+    tocantins_enabled = config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False)
+    return 7 if tocantins_enabled else 5
+
+
+def get_band_names(config: Dict[str, Any]) -> List[str]:
+    """
+    Get the list of band names based on configuration.
+    
+    Args:
+        config: Configuration dictionary
+    
+    Returns:
+        List of band names for the current configuration
+    """
+    base_bands = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
+    tocantins_enabled = config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False)
+    
+    if tocantins_enabled:
+        return base_bands + ["IS", "SS"]
+    return base_bands

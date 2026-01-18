@@ -13,8 +13,13 @@ preprocessing:
   landsat_version: 8
   
   # Tocantins Framework parameters
+  # IMPORTANT: Setting 'enabled: false' will disable IS/SS calculation throughout the pipeline
+  # This affects:
+  #   - Preprocessing: Only 5-band features will be calculated (NDBI, NDVI, NDWI, NDBSI, LST)
+  #   - Model: Input/output channels will be set to 5 automatically
+  #   - Analysis: Default weights will exclude IS/SS metrics
   tocantins:
-    enabled: true
+    enabled: true  # Set to false to skip IS/SS calculation during preprocessing
     k_threshold: 1.5
     spatial_params:
       min_anomaly_size: 1
@@ -31,6 +36,10 @@ preprocessing:
 model:
   # Architecture
   architecture: convlstm
+  # NOTE: input_channels and output_channels are auto-configured based on tocantins.enabled
+  # - If tocantins.enabled=true: 7 channels (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
+  # - If tocantins.enabled=false: 5 channels (NDBI, NDVI, NDWI, NDBSI, LST)
+  # You can override these values explicitly if needed
   input_channels: 7
   output_channels: 7
   hidden_dims: [64, 128, 256, 256, 128, 64]
@@ -131,7 +140,10 @@ analysis:
   # intervention priorities. Higher weight = more importance in the final score.
   # Weights are normalized automatically (don't need to sum to 1.0).
   #
-  # If not specified in config, the default values below will be used.
+  # IMPORTANT: If tocantins.enabled=false, the default weights will automatically
+  # exclude IS and SS metrics. The weights below are used when Tocantins is enabled.
+  # When disabled, defaults are: LST: 0.5, NDVI: 0.3, NDBI: 0.2
+  #
   # You can customize these to match your regional priorities or research focus.
   priority_weights:
     LST: 0.4   # Land Surface Temperature - direct measure of surface heat

@@ -22,8 +22,9 @@ class UrbanHeatDataset(Dataset):
     """
     PyTorch Dataset for spatiotemporal urban heat data.
 
-    Loads temporal sequences of rasters with 7 channels:
-    [NDBI, NDVI, NDWI, NDBSI, LST, IS, SS]
+    Loads temporal sequences of rasters with 5 or 7 channels:
+    - 5 channels: [NDBI, NDVI, NDWI, NDBSI, LST]
+    - 7 channels: [NDBI, NDVI, NDWI, NDBSI, LST, IS, SS]
 
     Args:
         data_dir: Directory with processed feature rasters.
@@ -72,8 +73,13 @@ class UrbanHeatDataset(Dataset):
             self.width = src.width
             self.n_channels = src.count
 
-        if self.n_channels != 5:
-            raise ValueError(f"Expected 5 channels, found {self.n_channels}")
+        # Validate channel count (must be 5 or 7)
+        if self.n_channels not in [5, 7]:
+            raise ValueError(
+                f"Expected 5 or 7 channels, found {self.n_channels}. "
+                f"5 channels: NDBI, NDVI, NDWI, NDBSI, LST (Tocantins disabled). "
+                f"7 channels: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS (Tocantins enabled)."
+            )
 
         # Calculate normalization statistics
         self.stats = self._calculate_stats() if normalize else None

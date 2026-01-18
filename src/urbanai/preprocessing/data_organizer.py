@@ -105,11 +105,18 @@ class TemporalDataProcessor:
 
             logger.info(f"Calculated scores for {len(tocantins_results)} years")
 
-        # Final outputs are complete features
+        # Determine final output files based on whether Tocantins was calculated
         final_files = {}
-        for path in sorted(self.output_dir.glob("*_features_complete.tif")):
-            year = self._extract_year(path.name)
-            final_files[year] = path
+        if calculate_tocantins:
+            # Final outputs are complete features (7 bands: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
+            for path in sorted(self.output_dir.glob("*_features_complete.tif")):
+                year = self._extract_year(path.name)
+                final_files[year] = path
+        else:
+            # Final outputs are basic features (5 bands: NDBI, NDVI, NDWI, NDBSI, LST)
+            for path in sorted(indices_dir.glob("*_features.tif")):
+                year = self._extract_year(path.name)
+                final_files[year] = path
 
         logger.info(f"Processing complete: {len(final_files)} years ready.")
 
@@ -137,7 +144,18 @@ class TemporalDataProcessor:
         """Validate all processed outputs."""
         logger.info("Validating processed outputs...")
 
-        output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
+        # Determine expected band count based on config
+        tocantins_enabled = self.config.get("tocantins", {}).get("enabled", False)
+        expected_bands = 7 if tocantins_enabled else 5
+        
+        # Determine which files to validate
+        if tocantins_enabled:
+            output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
+            expected_names = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
+        else:
+            indices_dir = self.output_dir / "indices"
+            output_files = sorted(indices_dir.glob("*_features.tif"))
+            expected_names = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
 
         if not output_files:
             logger.error("No output files found")
@@ -147,14 +165,16 @@ class TemporalDataProcessor:
             try:
                 import rasterio
                 with rasterio.open(file_path) as src:
-                    if src.count != 7:
-                        logger.error(f"Invalid band count in {file_path}: {src.count}")
+                    if src.count != expected_bands:
+                        logger.error(
+                            f"Invalid band count in {file_path}: {src.count}, "
+                            f"expected {expected_bands}"
+                        )
                         return False
 
-                    expected = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
                     descriptions = src.descriptions or []
 
-                    if len(descriptions) != 7:
+                    if len(descriptions) != expected_bands:
                         logger.warning(f"Missing band descriptions in {file_path}")
 
             except Exception as e:
@@ -166,7 +186,15 @@ class TemporalDataProcessor:
 
     def get_temporal_statistics(self) -> Dict:
         """Get statistics about processed temporal data."""
-        output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
+        # Check for both complete and basic features
+        tocantins_enabled = self.config.get("tocantins", {}).get("enabled", False)
+        
+        if tocantins_enabled:
+            output_files = sorted(self.output_dir.glob("*_features_complete.tif"))
+        else:
+            indices_dir = self.output_dir / "indices"
+            output_files = sorted(indices_dir.glob("*_features.tif"))
+            
         years = [self._extract_year(f.name) for f in output_files]
 
         if not years:
