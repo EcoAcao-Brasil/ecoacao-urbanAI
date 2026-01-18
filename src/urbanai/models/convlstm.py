@@ -268,12 +268,12 @@ class ConvLSTMEncoderDecoder(nn.Module):
 
     def __init__(
         self,
-        input_channels: int = 7,
+        input_channels: int = 5,
         hidden_dims: List[int] = [64, 128, 256],
         kernel_size: Tuple[int, int] = (3, 3),
         num_encoder_layers: int = 3,
         num_decoder_layers: int = 3,
-        output_channels: int = 7,
+        output_channels: int = 5,
         bias: bool = True,
     ) -> None:
         super().__init__()
