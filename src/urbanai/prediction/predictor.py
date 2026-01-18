@@ -33,7 +33,7 @@ class FuturePredictor:
         BAND_NAMES (List[str]): Standard ordering of spectral/heat bands.
     """
 
-    BAND_NAMES = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
+    BAND_NAMES = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST"]
 
     def __init__(
         self,
