@@ -72,8 +72,8 @@ class UrbanHeatDataset(Dataset):
             self.width = src.width
             self.n_channels = src.count
 
-        if self.n_channels != 7:
-            raise ValueError(f"Expected 7 channels, found {self.n_channels}")
+        if self.n_channels != 5:
+            raise ValueError(f"Expected 5 channels, found {self.n_channels}")
 
         # Calculate normalization statistics
         self.stats = self._calculate_stats() if normalize else None
