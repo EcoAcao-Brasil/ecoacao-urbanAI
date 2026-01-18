@@ -235,6 +235,10 @@ class TemporalDataProcessor:
             
         Returns:
             Dictionary mapping common band names to Landsat band descriptions
+            
+        Note:
+            Landsat 5 TM has no SR_B6 in the surface reflectance product.
+            Band 6 is only available as thermal (ST_B6), so swir2 maps to SR_B7.
         """
         if landsat_version == 8:
             return {
