@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -78,7 +78,7 @@ def get_input_channels(config: Dict[str, Any]) -> int:
     return 7 if tocantins_enabled else 5
 
 
-def get_band_names(config: Dict[str, Any]) -> list:
+def get_band_names(config: Dict[str, Any]) -> List[str]:
     """
     Get the list of band names based on configuration.
     

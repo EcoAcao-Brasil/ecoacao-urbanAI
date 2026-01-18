@@ -129,7 +129,7 @@ class FuturePredictor:
         logger.info(f"Prediction task complete for {target_year}")
         return result_meta
 
-    def _get_band_names(self) -> list:
+    def _get_band_names(self) -> List[str]:
         """
         Get band names based on model configuration.
         
