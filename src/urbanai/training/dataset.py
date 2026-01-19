@@ -324,17 +324,17 @@ def create_dataloaders(
     train_cfg = config.get("training", {})
     adv_cfg = config.get("advanced", {})
     
-    # Dataset Parameters
-    seq_len = train_cfg.get("sequence_length", 10)
-    pred_horizon = train_cfg.get("prediction_horizon", 1)
-    norm_method = train_cfg.get("normalization_method", "zscore")
-    normalize = train_cfg.get("normalize", True)
+    # Dataset Parameters - Try nested 'training' key first, then top-level, then default
+    seq_len = train_cfg.get("sequence_length", config.get("sequence_length", 10))
+    pred_horizon = train_cfg.get("prediction_horizon", config.get("prediction_horizon", 1))
+    norm_method = train_cfg.get("normalization_method", config.get("normalization_method", "zscore"))
+    normalize = train_cfg.get("normalize", config.get("normalize", True))
     
     # Loader Parameters
-    batch_size = train_cfg.get("batch_size", 8)
-    num_workers = train_cfg.get("num_workers", 4)
-    cache_mem = train_cfg.get("cache_in_memory", False)
-    pin_mem = train_cfg.get("pin_memory", True) and torch.cuda.is_available()
+    batch_size = train_cfg.get("batch_size", config.get("batch_size", 8))
+    num_workers = train_cfg.get("num_workers", config.get("num_workers", 4))
+    cache_mem = train_cfg.get("cache_in_memory", config.get("cache_in_memory", False))
+    pin_mem = train_cfg.get("pin_memory", config.get("pin_memory", True)) and torch.cuda.is_available()
 
     # Split Strategy
     split_cfg = train_cfg.get("train_val_split", {})

@@ -42,7 +42,13 @@ class UrbanAITrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.config = config or self._default_config()
+        # Merge user config with defaults, prioritizing user values
+        default_config = self._default_config()
+        if config:
+            self.config = self._deep_merge_config(default_config, config)
+        else:
+            self.config = default_config
+        
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
 
         # Initialize the ConvLSTM architecture
@@ -68,6 +74,14 @@ class UrbanAITrainer:
         logger.info("UrbanAI Trainer initialized")
         logger.info(f"Device: {self.device}")
         logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
+        
+        # Log effective configuration
+        logger.info("Effective training configuration:")
+        train_cfg = self.config.get('training', {})
+        logger.info(f"  Sequence Length: {train_cfg.get('sequence_length', self.config.get('sequence_length', 10))}")
+        logger.info(f"  Prediction Horizon: {train_cfg.get('prediction_horizon', self.config.get('prediction_horizon', 1))}")
+        logger.info(f"  Batch Size: {train_cfg.get('batch_size', self.config.get('batch_size', 8))}")
+        logger.info(f"  Learning Rate: {self.config.get('learning_rate', 0.001)}")
 
     def train(
         self,
@@ -298,6 +312,26 @@ class UrbanAITrainer:
             raise ValueError(f"Unknown optimizer: {optimizer_name}")
 
         return optimizer
+
+    @staticmethod
+    def _deep_merge_config(default: Dict, user: Dict) -> Dict:
+        """
+        Recursively merge user config into defaults, prioritizing user values.
+        
+        Args:
+            default: Default configuration dictionary
+            user: User-provided configuration dictionary
+            
+        Returns:
+            Merged configuration with user values taking precedence
+        """
+        merged = default.copy()
+        for key, value in user.items():
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                merged[key] = UrbanAITrainer._deep_merge_config(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
 
     @staticmethod
     def _default_config() -> Dict[str, Any]:

@@ -182,7 +182,7 @@ class UrbanAIPipeline:
         trainer = UrbanAITrainer(
             data_dir=data_dir,
             output_dir=models_dir,
-            config=self.config.get("training", {}),
+            config=self.config,  # Pass full config, not just training sub-dict
             device=self.device,
         )
 
