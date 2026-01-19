@@ -231,7 +231,7 @@ class TemporalDataProcessor:
         Get band mapping for specified Landsat version.
         
         Args:
-            landsat_version: Landsat satellite version (5 or 8)
+            landsat_version: Landsat satellite version (5, 7, 8, or 9)
             
         Returns:
             Dictionary mapping common band names to Landsat band descriptions
