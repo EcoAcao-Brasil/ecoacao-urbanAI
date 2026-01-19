@@ -240,7 +240,7 @@ class TemporalDataProcessor:
             Landsat 5 TM has no SR_B6 in the surface reflectance product.
             Band 6 is only available as thermal (ST_B6), so swir2 maps to SR_B7.
         """
-        if landsat_version == 8:
+        if landsat_version == 8 or landsat_version == 9:
             return {
                 "blue": "SR_B2",
                 "green": "SR_B3",
