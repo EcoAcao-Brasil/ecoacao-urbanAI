@@ -235,18 +235,55 @@ class UrbanHeatDataset(Dataset):
         return stats
 
     def _normalize(self, data: np.ndarray) -> np.ndarray:
-        """Apply normalization using pre-calculated statistics."""
+        """
+        Apply normalization using pre-calculated statistics.
+
+        Args:
+            data: Input array of shape (C, H, W) or (T, C, H, W)
+
+        Returns:
+            Normalized array with same shape as input
+        """
         if self.stats is None:
             return data
 
+        # Determine if data is temporal sequence or single frame
+        is_temporal = data.ndim == 4  # (T, C, H, W)
+
         if self.normalization_method == "zscore":
-            return (data - self.stats["mean"][:, None, None]) / self.stats["std"][:, None, None]
+            if is_temporal:
+                # Broadcasting: (T, C, H, W) - (1, C, 1, 1)
+                # Stats are (C, 1), need to reshape to (1, C, 1, 1)
+                mean = self.stats["mean"].reshape(1, -1, 1, 1)
+                std = self.stats["std"].reshape(1, -1, 1, 1)
+            else:
+                # Broadcasting: (C, H, W) - (C, 1, 1)
+                # Stats are (C, 1), need to reshape to (C, 1, 1)
+                mean = self.stats["mean"].reshape(-1, 1, 1)
+                std = self.stats["std"].reshape(-1, 1, 1)
+            return (data - mean) / std
 
         if self.normalization_method == "minmax":
-            return (data - self.stats["min"][:, None, None]) / self.stats["range"][:, None, None]
+            if is_temporal:
+                # Stats are (C, 1), need to reshape to (1, C, 1, 1)
+                min_val = self.stats["min"].reshape(1, -1, 1, 1)
+                range_val = self.stats["range"].reshape(1, -1, 1, 1)
+            else:
+                # Stats are (C, 1), need to reshape to (C, 1, 1)
+                min_val = self.stats["min"].reshape(-1, 1, 1)
+                range_val = self.stats["range"].reshape(-1, 1, 1)
+            return (data - min_val) / range_val
 
         if self.normalization_method == "robust":
-            return (data - self.stats["median"][:, None, None]) / self.stats["iqr"][:, None, None]
+            if is_temporal:
+                # Stats are (C, 1), need to reshape to (1, C, 1, 1)
+                median = self.stats["median"].reshape(1, -1, 1, 1)
+                iqr = self.stats["iqr"].reshape(1, -1, 1, 1)
+            else:
+                # Stats are (C, 1), need to reshape to (C, 1, 1)
+                median = self.stats["median"].reshape(-1, 1, 1)
+                iqr = self.stats["iqr"].reshape(-1, 1, 1)
+            return (data - median) / iqr
 
         return data
 
