@@ -237,10 +237,10 @@ class UrbanHeatDataset(Dataset):
     def _normalize(self, data: np.ndarray) -> np.ndarray:
         """
         Apply normalization using pre-calculated statistics.
-        
+
         Args:
             data: Input array of shape (C, H, W) or (T, C, H, W)
-            
+
         Returns:
             Normalized array with same shape as input
         """
@@ -249,7 +249,7 @@ class UrbanHeatDataset(Dataset):
 
         # Determine if data is temporal sequence or single frame
         is_temporal = data.ndim == 4  # (T, C, H, W)
-        
+
         if self.normalization_method == "zscore":
             if is_temporal:
                 # Broadcasting: (T, C, H, W) - (1, C, 1, 1)
