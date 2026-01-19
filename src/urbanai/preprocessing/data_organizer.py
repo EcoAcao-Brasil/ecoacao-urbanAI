@@ -250,7 +250,7 @@ class TemporalDataProcessor:
                 "swir2": "SR_B7",
                 "thermal": "ST_B10"
             }
-        elif landsat_version == 5:
+        elif landsat_version == 5 or landsat_version == 7:
             return {
                 "blue": "SR_B1",
                 "green": "SR_B2",
