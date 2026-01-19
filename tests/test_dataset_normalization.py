@@ -5,7 +5,6 @@ Ensures that the _normalize method correctly handles both 3D (C, H, W) and 4D (T
 """
 
 import numpy as np
-import pytest
 
 from urbanai.training.dataset import UrbanHeatDataset
 
