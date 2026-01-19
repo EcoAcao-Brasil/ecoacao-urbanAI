@@ -44,23 +44,27 @@ class UrbanAIPipeline:
         setup_logger(log_file=self.output_dir / "pipeline.log", verbose=verbose)
 
         self.config = self._load_config(config)
-        
+
         # Auto-configure input channels based on Tocantins setting
         if "model" not in self.config:
             self.config["model"] = {}
-        
+
         # Only override if not explicitly set by user
         if "input_channels" not in self.config.get("model", {}):
             self.config["model"]["input_channels"] = get_input_channels(self.config)
             self.config["model"]["output_channels"] = get_input_channels(self.config)
-        
+
         self.device = self._setup_device(device)
 
         # State tracking for results that are passed between steps
         self._predictions: Optional[Dict[str, Any]] = None
         self._intervention_priorities: Optional[Dict[str, Any]] = None
 
-        tocantins_status = "enabled" if self.config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False) else "disabled"
+        tocantins_status = (
+            "enabled"
+            if self.config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False)
+            else "disabled"
+        )
         logger.info("UrbanAI Pipeline initialized")
         logger.info(f"Input: {self.input_dir}")
         logger.info(f"Output: {self.output_dir}")
@@ -182,7 +186,7 @@ class UrbanAIPipeline:
         trainer = UrbanAITrainer(
             data_dir=data_dir,
             output_dir=models_dir,
-            config=self.config.get("training", {}),
+            config=self.config,  # Pass full config, not just training sub-dict
             device=self.device,
         )
 

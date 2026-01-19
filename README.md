@@ -285,6 +285,39 @@ ConvLSTM Encoder-Decoder:
 
 ## Configuration
 
+### Configuration Structure
+
+UrbanAI supports both top-level and nested training parameters for flexibility:
+
+```python
+config = {
+    # Option 1: Top-level (simpler)
+    'sequence_length': 4,
+    'batch_size': 8,
+    'learning_rate': 0.001,
+    
+    # Option 2: Nested under 'training' (more organized)
+    'training': {
+        'sequence_length': 4,
+        'batch_size': 8,
+        'learning_rate': 0.001
+    },
+    
+    # Model config (always nested)
+    'model': {
+        'input_channels': 5,
+        'hidden_dims': [64, 128, 256]
+    }
+}
+```
+
+**Priority**: Nested `training.*` > Top-level > Defaults
+
+This flexible structure allows you to:
+- Use simple top-level keys for quick configuration
+- Organize related parameters under `training` for clarity
+- Override any parameter without affecting others (deep merge)
+
 ### Preprocessing Config (`configs/preprocessing_config.yaml`)
 
 ```yaml
