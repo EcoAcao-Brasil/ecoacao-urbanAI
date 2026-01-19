@@ -26,7 +26,7 @@ class UrbanAITrainer:
     """
     Orchestrates the model training process.
 
-    This class abstracts away the PyTorch boilerplate, handling device 
+    This class abstracts away the PyTorch boilerplate, handling device
     management, gradient updates, metric tracking (TensorBoard/Console),
     and checkpointing with metadata.
     """
@@ -48,7 +48,7 @@ class UrbanAITrainer:
             self.config = self._deep_merge_config(default_config, config)
         else:
             self.config = default_config
-        
+
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
 
         # Initialize the ConvLSTM architecture
@@ -56,9 +56,9 @@ class UrbanAITrainer:
         self.model.to(self.device)
 
         self.optimizer = self._build_optimizer()
-        
+
         # Standard MSE is sufficient for pixel-level temperature regression
-        self.criterion = nn.MSELoss() 
+        self.criterion = nn.MSELoss()
 
         # State tracking
         self.current_epoch = 0
@@ -74,13 +74,19 @@ class UrbanAITrainer:
         logger.info("UrbanAI Trainer initialized")
         logger.info(f"Device: {self.device}")
         logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
-        
+
         # Log effective configuration
         logger.info("Effective training configuration:")
-        train_cfg = self.config.get('training', {})
-        logger.info(f"  Sequence Length: {train_cfg.get('sequence_length', self.config.get('sequence_length', 10))}")
-        logger.info(f"  Prediction Horizon: {train_cfg.get('prediction_horizon', self.config.get('prediction_horizon', 1))}")
-        logger.info(f"  Batch Size: {train_cfg.get('batch_size', self.config.get('batch_size', 8))}")
+        train_cfg = self.config.get("training", {})
+        logger.info(
+            f"  Sequence Length: {train_cfg.get('sequence_length', self.config.get('sequence_length', 10))}"
+        )
+        logger.info(
+            f"  Prediction Horizon: {train_cfg.get('prediction_horizon', self.config.get('prediction_horizon', 1))}"
+        )
+        logger.info(
+            f"  Batch Size: {train_cfg.get('batch_size', self.config.get('batch_size', 8))}"
+        )
         logger.info(f"  Learning Rate: {self.config.get('learning_rate', 0.001)}")
 
     def train(
@@ -105,7 +111,7 @@ class UrbanAITrainer:
             data_dir=self.data_dir,
             config=self.config,
         )
-        
+
         # Capture dataset reference to extract normalization stats later
         train_dataset = train_loader.dataset
 
@@ -167,7 +173,7 @@ class UrbanAITrainer:
             targets = targets.to(self.device)
 
             self.optimizer.zero_grad()
-            
+
             # Predict future frames based on target horizon
             outputs = self.model(inputs, future_steps=targets.shape[1])
             loss = self.criterion(outputs, targets)
@@ -264,7 +270,7 @@ class UrbanAITrainer:
             "normalization_stats": None,
             "normalization_method": None,
         }
-        
+
         # Embed normalization stats if dataset is available
         if train_dataset is not None:
             # Assumes dataset has a method to retrieve computed stats
@@ -272,12 +278,16 @@ class UrbanAITrainer:
                 norm_stats = train_dataset.get_normalization_stats()
                 if norm_stats is not None:
                     checkpoint["normalization_stats"] = norm_stats
-                    
+
                     # Retrieve method from config or default to 'zscore'
                     train_conf = self.config.get("training", {})
-                    checkpoint["normalization_method"] = train_conf.get("normalization_method", "zscore")
-                    
-                    logger.debug(f"Embedded normalization stats ({checkpoint['normalization_method']}) into checkpoint.")
+                    checkpoint["normalization_method"] = train_conf.get(
+                        "normalization_method", "zscore"
+                    )
+
+                    logger.debug(
+                        f"Embedded normalization stats ({checkpoint['normalization_method']}) into checkpoint."
+                    )
 
         torch.save(checkpoint, checkpoint_path)
         logger.debug(f"Checkpoint saved: {checkpoint_path}")
@@ -317,11 +327,11 @@ class UrbanAITrainer:
     def _deep_merge_config(default: Dict, user: Dict) -> Dict:
         """
         Recursively merge user config into defaults, prioritizing user values.
-        
+
         Args:
             default: Default configuration dictionary
             user: User-provided configuration dictionary
-            
+
         Returns:
             Merged configuration with user values taking precedence
         """
@@ -343,9 +353,7 @@ class UrbanAITrainer:
             "optimizer": "adam",
             "gradient_clip": 1.0,
             "num_workers": 4,
-            "training": {
-                "normalization_method": "zscore"
-            },
+            "training": {"normalization_method": "zscore"},
             "model": {
                 "input_channels": 5,  # Default to 5 (no Tocantins)
                 "hidden_dims": [64, 128, 256, 256, 128, 64],

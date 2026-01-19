@@ -8,9 +8,10 @@ import logging
 import random
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
-import psutil
+from typing import Dict, List, Optional, Tuple
+
 import numpy as np
+import psutil
 import rasterio
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -63,9 +64,7 @@ class UrbanHeatDataset(Dataset):
         self.file_paths = self._find_files(years)
         min_required = sequence_length + prediction_horizon
         if len(self.file_paths) < min_required:
-            raise ValueError(
-                f"Need at least {min_required} years, found {len(self.file_paths)}"
-            )
+            raise ValueError(f"Need at least {min_required} years, found {len(self.file_paths)}")
 
         # Get spatial dimensions from first file
         with rasterio.open(self.file_paths[0]) as src:
@@ -186,17 +185,17 @@ class UrbanHeatDataset(Dataset):
     def _estimate_cache_size(self) -> int:
         """
         Estimate memory required for caching all data in bytes.
-        
+
         Returns:
             Estimated size in bytes
         """
         # Rough estimate: n_files * channels * height * width * 4 bytes (float32)
         size_per_file = self.n_channels * self.height * self.width * 4
         total_size = len(self.file_paths) * size_per_file
-        
+
         logger.debug(f"Estimated cache size: {total_size / 1e9:.2f} GB")
         return total_size
-    
+
     def _calculate_stats(self) -> Dict[str, np.ndarray]:
         """Calculate statistics for the selected normalization method."""
         logger.info(f"Calculating {self.normalization_method} statistics...")
@@ -323,23 +322,27 @@ def create_dataloaders(
     """
     train_cfg = config.get("training", {})
     adv_cfg = config.get("advanced", {})
-    
+
     # Dataset Parameters - Try nested 'training' key first, then top-level, then default
     seq_len = train_cfg.get("sequence_length", config.get("sequence_length", 10))
     pred_horizon = train_cfg.get("prediction_horizon", config.get("prediction_horizon", 1))
-    norm_method = train_cfg.get("normalization_method", config.get("normalization_method", "zscore"))
+    norm_method = train_cfg.get(
+        "normalization_method", config.get("normalization_method", "zscore")
+    )
     normalize = train_cfg.get("normalize", config.get("normalize", True))
-    
+
     # Loader Parameters
     batch_size = train_cfg.get("batch_size", config.get("batch_size", 8))
     num_workers = train_cfg.get("num_workers", config.get("num_workers", 4))
     cache_mem = train_cfg.get("cache_in_memory", config.get("cache_in_memory", False))
-    pin_mem = train_cfg.get("pin_memory", config.get("pin_memory", True)) and torch.cuda.is_available()
+    pin_mem = (
+        train_cfg.get("pin_memory", config.get("pin_memory", True)) and torch.cuda.is_available()
+    )
 
     # Split Strategy
     split_cfg = train_cfg.get("train_val_split", {})
     split_method = split_cfg.get("method", "temporal")
-    
+
     all_files = sorted(data_dir.glob("*_features*.tif"))
     all_years = sorted([UrbanHeatDataset._extract_year(f.name) for f in all_files])
 
@@ -348,16 +351,16 @@ def create_dataloaders(
         val_years = split_cfg.get("val_years")
         if train_years is None or val_years is None:
             raise ValueError("Manual split requires 'train_years' and 'val_years'")
-            
+
     elif split_method == "random":
         random.seed(adv_cfg.get("random_seed", 42))
         years_shuffled = list(all_years)
         random.shuffle(years_shuffled)
-        
+
         split_idx = int(len(years_shuffled) * split_cfg.get("train_ratio", 0.8))
         train_years = sorted(years_shuffled[:split_idx])
         val_years = sorted(years_shuffled[split_idx:])
-        
+
     else:  # "temporal" default
         split_idx = int(len(all_years) * split_cfg.get("train_ratio", 0.8))
         train_years = all_years[:split_idx]
