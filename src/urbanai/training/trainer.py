@@ -95,11 +95,10 @@ class UrbanAITrainer:
         logger.info(f"  Learning Rate: {self.config.get('learning_rate', 0.001)}")
 
         # Log effective batch size if using gradient accumulation
-        grad_accum = self.config.get("gradient_accumulation_steps", 1)
-        if grad_accum > 1:
+        if grad_accum_steps > 1:
             physical_batch = train_cfg.get('batch_size', self.config.get('batch_size', 8))
-            effective_batch = physical_batch * grad_accum
-            logger.info(f"  Gradient Accumulation: {grad_accum} steps")
+            effective_batch = physical_batch * grad_accum_steps
+            logger.info(f"  Gradient Accumulation: {grad_accum_steps} steps")
             logger.info(f"  Effective Batch Size: {effective_batch} (physical: {physical_batch})")
 
     def train(
