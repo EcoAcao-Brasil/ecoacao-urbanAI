@@ -322,7 +322,8 @@ class UrbanHeatDataset(Dataset):
 
         # 180° rotation ONLY (preserves spatial dimensions)
         if np.random.rand() < cfg["rotation_prob"]:
-            # Only use 180° rotation (k=2) to avoid dimension mismatch
+            # Always use 180° rotation (k=2) to avoid dimension mismatch
+            # Note: cfg["rotation_angles"] is ignored; only 180° is supported
             input_seq = np.rot90(input_seq, k=2, axes=(2, 3)).copy()
             target_seq = np.rot90(target_seq, k=2, axes=(2, 3)).copy()
 
