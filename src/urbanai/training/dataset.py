@@ -290,7 +290,24 @@ class UrbanHeatDataset(Dataset):
     def _augment_sequence(
         self, input_seq: np.ndarray, target_seq: np.ndarray
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Apply data augmentation based on configuration."""
+        """
+        Apply data augmentation based on configuration.
+        
+        Applies:
+        - Horizontal/vertical flips (preserve dimensions)
+        - 180° rotation (preserves dimensions)
+        - Gaussian noise
+        
+        Note: 90° and 270° rotations are NOT supported because they swap
+        height/width dimensions, breaking batch collation in DataLoader.
+        
+        Args:
+            input_seq: Input sequence (T, C, H, W)
+            target_seq: Target sequence (T, C, H, W)
+            
+        Returns:
+            Augmented (input_seq, target_seq) with same shapes
+        """
         cfg = self.augment_config
 
         # Horizontal flip
@@ -303,12 +320,12 @@ class UrbanHeatDataset(Dataset):
             input_seq = np.flip(input_seq, axis=2).copy()
             target_seq = np.flip(target_seq, axis=2).copy()
 
-        # Random rotation
+        # 180° rotation ONLY (preserves spatial dimensions)
         if np.random.rand() < cfg["rotation_prob"]:
-            angle = np.random.choice(cfg["rotation_angles"])
-            k = angle // 90
-            input_seq = np.rot90(input_seq, k=k, axes=(2, 3)).copy()
-            target_seq = np.rot90(target_seq, k=k, axes=(2, 3)).copy()
+            # Always use 180° rotation (k=2) to avoid dimension mismatch
+            # Note: cfg["rotation_angles"] is ignored; only 180° is supported
+            input_seq = np.rot90(input_seq, k=2, axes=(2, 3)).copy()
+            target_seq = np.rot90(target_seq, k=2, axes=(2, 3)).copy()
 
         # Gaussian noise
         if np.random.rand() < cfg["noise_prob"]:
@@ -325,7 +342,7 @@ class UrbanHeatDataset(Dataset):
             "horizontal_flip_prob": 0.5,
             "vertical_flip_prob": 0.5,
             "rotation_prob": 0.5,
-            "rotation_angles": [90, 180, 270],
+            "rotation_angles": [180],  # Only 180° to preserve dimensions
             "noise_prob": 0.0,
             "noise_std": 0.01,
         }
