@@ -422,6 +422,66 @@ residuals = analyzer.calculate_all_residuals()
 
 ---
 
+## Training on Limited RAM
+
+For large datasets on consumer hardware, use gradient accumulation to train models without running out of memory:
+
+### What is Gradient Accumulation?
+
+Instead of updating weights after every batch, gradients are accumulated over multiple small batches, then weights are updated once. This gives the training quality of large batches with the memory footprint of small batches.
+
+**Example:**
+- Physical batch_size = 2 (fits in RAM)
+- gradient_accumulation_steps = 4
+- **Effective batch_size = 2 × 4 = 8** (same training quality)
+
+### Configuration
+
+```python
+config = {
+    'training': {
+        'batch_size': 2,  # What fits in your RAM
+        'gradient_accumulation_steps': 4,  # Effective batch_size = 2×4 = 8
+    }
+}
+
+trainer = UrbanAITrainer(
+    data_dir="data/processed",
+    output_dir="results",
+    config=config
+)
+```
+
+### Hardware Guidelines
+
+**Rule of thumb:**
+- **12GB RAM**: batch_size=2, gradient_accumulation_steps=4
+- **8GB RAM**: batch_size=1, gradient_accumulation_steps=8
+- **24GB+ RAM**: batch_size=8, gradient_accumulation_steps=1 (or omit)
+
+### Benefits
+
+✅ Train on **all data** regardless of RAM  
+✅ Maintain **training quality** of large batches  
+✅ **User controls** trade-off between speed and memory  
+✅ **Simple**: One parameter to configure  
+✅ **Backward compatible**: Defaults to normal behavior (gradient_accumulation_steps=1)
+
+### Example: Very Limited RAM
+
+```python
+# For minimal hardware (8GB RAM or less)
+config = {
+    'training': {
+        'batch_size': 1,  # Minimum - one sample at a time
+        'gradient_accumulation_steps': 8,  # High accumulation
+    }
+}
+# Behavior: Effective batch_size = 8, only 1 sample in RAM at a time
+```
+
+---
+
 ## Input Data Requirements
 
 ### Landsat Collection

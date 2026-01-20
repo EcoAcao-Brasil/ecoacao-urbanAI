@@ -75,6 +75,11 @@ class UrbanAITrainer:
         logger.info(f"Device: {self.device}")
         logger.info(f"Model parameters: {sum(p.numel() for p in self.model.parameters()):,}")
 
+        # Log gradient accumulation if enabled
+        grad_accum_steps = self.config.get("gradient_accumulation_steps", 1)
+        if grad_accum_steps > 1:
+            logger.info(f"Gradient accumulation: {grad_accum_steps} steps")
+
         # Log effective configuration
         logger.info("Effective training configuration:")
         train_cfg = self.config.get("training", {})
@@ -88,6 +93,13 @@ class UrbanAITrainer:
             f"  Batch Size: {train_cfg.get('batch_size', self.config.get('batch_size', 8))}"
         )
         logger.info(f"  Learning Rate: {self.config.get('learning_rate', 0.001)}")
+
+        # Log effective batch size if using gradient accumulation
+        if grad_accum_steps > 1:
+            physical_batch = train_cfg.get('batch_size', self.config.get('batch_size', 8))
+            effective_batch = physical_batch * grad_accum_steps
+            logger.info(f"  Gradient Accumulation: {grad_accum_steps} steps")
+            logger.info(f"  Effective Batch Size: {effective_batch} (physical: {physical_batch})")
 
     def train(
         self,
@@ -165,6 +177,9 @@ class UrbanAITrainer:
         """Runs a single pass over the training set."""
         self.model.train()
         total_loss = 0.0
+        
+        # Get gradient accumulation steps
+        grad_accum_steps = self.config.get("gradient_accumulation_steps", 1)
 
         pbar = tqdm(train_loader, desc=f"Epoch {self.current_epoch+1} [Train]")
 
@@ -172,23 +187,32 @@ class UrbanAITrainer:
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
 
-            self.optimizer.zero_grad()
-
-            # Predict future frames based on target horizon
+            # Forward pass
             outputs = self.model(inputs, future_steps=targets.shape[1])
             loss = self.criterion(outputs, targets)
+            
+            # Scale loss by accumulation steps
+            if grad_accum_steps > 1:
+                loss = loss / grad_accum_steps
 
+            # Backward pass
             loss.backward()
 
-            if self.config.get("gradient_clip"):
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
-                    self.config["gradient_clip"],
-                )
+            # Only update weights every N steps
+            if (batch_idx + 1) % grad_accum_steps == 0 or (batch_idx + 1) == len(train_loader):
+                # Gradient clipping
+                if self.config.get("gradient_clip"):
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(),
+                        self.config["gradient_clip"],
+                    )
 
-            self.optimizer.step()
+                # Update weights
+                self.optimizer.step()
+                self.optimizer.zero_grad()
 
-            total_loss += loss.item()
+            # Accumulate unscaled loss for logging
+            total_loss += loss.item() * grad_accum_steps
             avg_loss = total_loss / (batch_idx + 1)
             pbar.set_postfix({"loss": f"{avg_loss:.6f}"})
 
@@ -352,6 +376,7 @@ class UrbanAITrainer:
             "learning_rate": 0.001,
             "optimizer": "adam",
             "gradient_clip": 1.0,
+            "gradient_accumulation_steps": 1,
             "num_workers": 4,
             "training": {"normalization_method": "zscore"},
             "model": {
