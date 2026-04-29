@@ -20,28 +20,27 @@ def calculate_metrics(
     """
     metrics = {}
 
-    # Mean Absolute Error
     mae = torch.mean(torch.abs(predictions - targets)).item()
     metrics["mae"] = mae
 
-    # Root Mean Squared Error
     mse = torch.mean((predictions - targets) ** 2).item()
-    rmse = torch.sqrt(torch.tensor(mse)).item()
-    metrics["rmse"] = rmse
+    metrics["rmse"] = torch.sqrt(torch.tensor(mse)).item()
 
+    n_channels = predictions.shape[2]
+    channel_names = ALL_CHANNEL_NAMES[:n_channels]
+    
     # R² Score (per channel)
-    for i, channel in enumerate(["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]):
+    for i, channel in enumerate(channel_names):
         pred_channel = predictions[:, :, i, :, :]
         target_channel = targets[:, :, i, :, :]
 
-        # Calculate R²
         ss_res = torch.sum((target_channel - pred_channel) ** 2)
         ss_tot = torch.sum((target_channel - target_channel.mean()) ** 2)
 
         if ss_tot > 0:
             r2 = 1 - (ss_res / ss_tot)
             metrics[f"r2_{channel}"] = r2.item()
-
+            
     # Spatial correlation (per timestep)
     for t in range(predictions.shape[1]):
         pred_t = predictions[:, t, :, :, :].flatten()
