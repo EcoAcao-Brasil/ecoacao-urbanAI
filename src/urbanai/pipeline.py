@@ -1,7 +1,7 @@
 """
-UrbanAI Main Pipeline
+UrbanAI Pipeline
 
-Operates the full workflow from raw GeoTIFF to urban heat prediction and intervention analysis.
+Orchestrates the full workflow: raw GeoTIFF preprocessing → model training → predicted raster output.
 """
 
 import logging
@@ -11,7 +11,6 @@ from typing import Any, Dict, Optional, Union
 
 import yaml
 
-from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
 from urbanai.prediction import FuturePredictor
 from urbanai.preprocessing import TemporalDataProcessor
 from urbanai.training import UrbanAITrainer
@@ -24,7 +23,10 @@ logger = logging.getLogger(__name__)
 
 class UrbanAIPipeline:
     """
-    Main entry point for the Urban Heat Island assessment system.
+    Runs preprocessing, training, and prediction in sequence.
+
+    Each stage can be toggled independently, allowing the pipeline to resume
+    from a saved model or preprocessed data without repeating earlier steps.
     """
 
     def __init__(
@@ -37,39 +39,27 @@ class UrbanAIPipeline:
     ) -> None:
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
-
-        # Ensure we have a place to dump logs and results immediately
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         setup_logger(log_file=self.output_dir / "pipeline.log", verbose=verbose)
 
         self.config = self._load_config(config)
 
-        # Auto-configure input channels based on Tocantins setting
         if "model" not in self.config:
             self.config["model"] = {}
 
-        # Only override if not explicitly set by user
         if "input_channels" not in self.config.get("model", {}):
             self.config["model"]["input_channels"] = get_input_channels(self.config)
             self.config["model"]["output_channels"] = get_input_channels(self.config)
 
         self.device = self._setup_device(device)
 
-        # State tracking for results that are passed between steps
         self._predictions: Optional[Dict[str, Any]] = None
-        self._intervention_priorities: Optional[Dict[str, Any]] = None
 
-        tocantins_status = (
-            "enabled"
-            if self.config.get("preprocessing", {}).get("tocantins", {}).get("enabled", False)
-            else "disabled"
-        )
         logger.info("UrbanAI Pipeline initialized")
         logger.info(f"Input: {self.input_dir}")
         logger.info(f"Output: {self.output_dir}")
         logger.info(f"Device: {self.device}")
-        logger.info(f"Tocantins Framework: {tocantins_status}")
         logger.info(f"Model channels: {self.config['model']['input_channels']}")
 
     def run(
@@ -77,67 +67,60 @@ class UrbanAIPipeline:
         preprocess: bool = True,
         train: bool = True,
         predict_year: Optional[int] = None,
-        analyze_interventions: bool = True,
         visualize: bool = True,
     ) -> Dict[str, Any]:
         """
-        Runs the pipeline stages in sequence.
+        Run pipeline stages in sequence.
 
-        You can toggle specific stages off (e.g., set train=False to use a saved model).
-        Note: `predict_year` is mandatory if you want to generate new forecasts or analysis.
+        Args:
+            preprocess: Run preprocessing on raw GeoTIFFs.
+            train: Train the ConvLSTM model.
+            predict_year: Future year to predict. Must exceed the most recent data year.
+            visualize: Generate visualization outputs (PNG maps).
+
+        Returns:
+            Dictionary with status and paths to all outputs.
         """
         logger.info("Starting UrbanAI Pipeline...")
 
-        results = {
+        results: Dict[str, Any] = {
             "status": "running",
             "config": self.config,
             "device": str(self.device),
         }
 
         try:
-            # 1. Prepare Data
+            # 1. Preprocess
             if preprocess:
-                logger.info("Step 1/5: Preprocessing data...")
+                logger.info("Step 1/4: Preprocessing data...")
                 processed_dir = self._run_preprocessing()
                 results["processed_data_dir"] = str(processed_dir)
             else:
-                # Assume data exists if we aren't running preprocessing
                 processed_dir = self.output_dir / "processed"
 
-            # 2. Model Training
+            # 2. Train
             if train:
-                logger.info("Step 2/5: Training model...")
+                logger.info("Step 2/4: Training model...")
                 model_path = self._run_training()
                 results["model_path"] = str(model_path)
             else:
-                # Fallback to a previously trained best model
                 model_path = self.output_dir / "models" / "convlstm_best.pth"
 
-            # 3. Future Prediction
+            # 3. Predict
             if predict_year is not None:
-                logger.info(f"Step 3/5: Predicting year {predict_year}...")
+                logger.info(f"Step 3/4: Predicting year {predict_year}...")
                 predictions = self._run_prediction(predict_year)
                 results["predictions"] = predictions
             else:
-                logger.info("Step 3/5: Skipping prediction (no target year specified)")
-                predictions = None
+                logger.info("Step 3/4: Skipping prediction (no target year specified)")
 
-            # 4. Intervention Analysis (Residuals & Hotspots)
-            if analyze_interventions and predict_year is not None:
-                logger.info("Step 4/5: Analyzing interventions...")
-                interventions = self._run_analysis(predict_year)
-                results["interventions"] = interventions
-            else:
-                logger.info("Step 4/5: Skipping analysis")
-                interventions = None
-
-            # 5. Visualization Generation
+            # 4. Visualize
             if visualize and predict_year is not None:
-                logger.info("Step 5/5: Generating visualizations...")
+                logger.info("Step 4/4: Generating visualizations...")
                 viz_outputs = self._generate_visualizations(predict_year)
                 results["visualizations"] = viz_outputs
             else:
-                logger.info("Step 5/5: Skipping visualization")
+                logger.info("Step 4/4: Skipping visualization")
 
             results["status"] = "success"
             logger.info("Pipeline completed successfully")
@@ -151,7 +134,7 @@ class UrbanAIPipeline:
         return results
 
     def _run_preprocessing(self) -> Path:
-        """Handles the normalization and index calculation for raw GeoTIFFs."""
+        """Normalize raw GeoTIFFs and calculate spectral indices."""
         processed_dir = self.output_dir / "processed"
 
         processor = TemporalDataProcessor(
@@ -160,7 +143,6 @@ class UrbanAIPipeline:
             config=self.config.get("preprocessing", {}),
         )
 
-        # If specific years aren't listed in config, generate the range automatically
         years = self.config.get("preprocessing", {}).get("years")
         if years is None:
             start = self.config["preprocessing"]["start_year"]
@@ -178,7 +160,7 @@ class UrbanAIPipeline:
         return processed_dir
 
     def _run_training(self) -> Path:
-        """Initializes the trainer and runs the training loop."""
+        """Train the ConvLSTM model on preprocessed data."""
         data_dir = self.output_dir / "processed"
         models_dir = self.output_dir / "models"
         models_dir.mkdir(exist_ok=True)
@@ -186,7 +168,7 @@ class UrbanAIPipeline:
         trainer = UrbanAITrainer(
             data_dir=data_dir,
             output_dir=models_dir,
-            config=self.config,  # Pass full config, not just training sub-dict
+            config=self.config,
             device=self.device,
         )
 
@@ -202,14 +184,12 @@ class UrbanAIPipeline:
         return model_path
 
     def _run_prediction(self, target_year: int) -> Dict[str, Any]:
-        """Loads the best model and generates a forecast for the target year."""
+        """Generate a predicted raster for target_year using the trained model."""
         model_path = self.output_dir / "models" / "convlstm_best.pth"
         predictions_dir = self.output_dir / "predictions"
         predictions_dir.mkdir(exist_ok=True)
 
         processed_dir = self.output_dir / "processed"
-
-        # Dynamically determine the most recent year from available data
         current_year = self._get_most_recent_year(processed_dir)
 
         if current_year is None:
@@ -237,130 +217,55 @@ class UrbanAIPipeline:
         )
 
         self._predictions = predictions
-        logger.info(f"Predictions saved: {predictions['output_path']}")
+        logger.info(f"Prediction saved: {predictions['output_path']}")
         return predictions
 
-    def _run_analysis(self, target_year: int) -> Dict[str, Any]:
-        """Compares current state vs. predicted state to identify priority zones."""
-        processed_dir = self.output_dir / "processed"
-
-        # Dynamically determine the most recent year
-        current_year = self._get_most_recent_year(processed_dir)
-
-        if current_year is None:
-            raise ValueError(f"No processed files found in {processed_dir}")
-
-        current_raster = processed_dir / f"{current_year}_features_complete.tif"
-
-        # Handle alternative naming patterns
-        if not current_raster.exists():
-            current_raster = processed_dir / f"{current_year}_features.tif"
-
-        if not current_raster.exists():
-            raise FileNotFoundError(
-                f"Could not find raster for year {current_year} in {processed_dir}"
-            )
-
-        predicted_raster = self._predictions["output_path"]
-
-        analysis_dir = self.output_dir / "analysis"
-        analysis_dir.mkdir(exist_ok=True)
-
-        # 1. Calculate the 'residual' (difference between prediction and current state)
-        residual_calc = ResidualCalculator(
-            current_raster=current_raster,
-            future_raster=predicted_raster,
-            output_dir=analysis_dir,
-            weights=self.config.get("analysis", {}).get("priority_weights"),
-        )
-        residuals = residual_calc.calculate_all_residuals()
-
-        # 2. Determine where interventions are needed most
-        analyzer = InterventionAnalyzer(
-            residuals_path=residuals["combined_residuals"],
-            current_raster=current_raster,
-            output_dir=analysis_dir,
-        )
-
-        priorities = analyzer.identify_priority_zones(
-            threshold=self.config.get("analysis", {}).get("threshold", "high"),
-            save_geojson=True,
-            save_raster=True,
-        )
-
-        self._intervention_priorities = priorities
-        logger.info(f"Analysis complete: {priorities['n_hotspot_zones']} priority zones")
-        return priorities
-
     def _generate_visualizations(self, target_year: int) -> Dict[str, Path]:
-        """Creates plotting outputs (maps and temporal charts)."""
+        """Generate PNG maps for the processed data and prediction."""
         viz_dir = self.output_dir / "visualizations"
         viz_dir.mkdir(exist_ok=True)
 
         generator = MapGenerator(output_dir=viz_dir)
-
         outputs = {}
 
-        # Historical trend
         data_dir = self.output_dir / "processed"
         outputs["temporal_evolution"] = generator.plot_temporal_evolution(
             data_dir=data_dir,
             metric="LST",
         )
 
-        # Future Heat Map
         if self._predictions:
             outputs["prediction_map"] = generator.plot_prediction_map(
                 prediction_path=self._predictions["output_path"],
                 title=f"Predicted Urban Heat {target_year}",
             )
 
-        # Priority Zones Map
-        if self._intervention_priorities:
-            outputs["intervention_map"] = generator.plot_intervention_map(
-                priorities_path=self._intervention_priorities["output_path"],
-                title="Intervention Priorities",
-            )
-
         logger.info(f"Visualizations saved: {viz_dir}")
         return outputs
 
     def _get_most_recent_year(self, data_dir: Path) -> Optional[int]:
-        """
-        Dynamically determine the most recent year from available processed files.
-
-        Args:
-            data_dir: Directory containing processed feature files
-
-        Returns:
-            Most recent year, or None if no files found
-        """
+        """Return the most recent year found in processed feature files."""
         files = sorted(data_dir.glob("*_features*.tif"))
-
         if not files:
             return None
-
-        years = sorted([self._extract_year(f.name) for f in files])
+        years = [self._extract_year(f.name) for f in files]
         return max(years)
 
     @staticmethod
     def _extract_year(filename: str) -> int:
-        """Extract year from filename."""
-
+        """Extract a 4-digit year from a filename."""
         match = re.search(r"(\d{4})", filename)
         if match:
             return int(match.group(1))
         raise ValueError(f"Could not extract year from: {filename}")
 
     def get_predictions(self) -> Optional[Dict[str, Any]]:
+        """Return the last prediction result, or None if no prediction has been run."""
         return self._predictions
-
-    def get_intervention_priorities(self) -> Optional[Dict[str, Any]]:
-        return self._intervention_priorities
 
     @staticmethod
     def _load_config(config: Optional[Union[str, Path, Dict[str, Any]]]) -> Dict[str, Any]:
-        """Resolves configuration from a file path, a dictionary, or defaults."""
+        """Load configuration from a file path, a dict, or built-in defaults."""
         if config is None:
             return UrbanAIPipeline._default_config()
 
@@ -376,19 +281,14 @@ class UrbanAIPipeline:
 
     @staticmethod
     def _default_config() -> Dict[str, Any]:
-        """
-        Provides sensible defaults for standard ConvLSTM heat prediction.
-
-        Note: These defaults use 1985-2023 as an example range. Users should
-        update these values based on their specific data availability.
-        """
+        """Built-in defaults. Override any key via a config file or dict."""
         return {
             "preprocessing": {
                 "start_year": 1985,
-                "end_year": 2023,  # Changed from 2025 to avoid assumptions
+                "end_year": 2023,
                 "interval": 2,
                 "tocantins": {
-                    "enabled": False,  # Disabled by default for safety
+                    "enabled": False,
                 },
             },
             "training": {
@@ -399,14 +299,11 @@ class UrbanAIPipeline:
                 "early_stopping": {"patience": 15},
             },
             "model": {
-                "input_channels": 5,  # Will be auto-configured based on tocantins.enabled
+                "input_channels": 5,
                 "hidden_dims": [64, 128, 256, 256, 128, 64],
                 "kernel_size": 3,
                 "num_encoder_layers": 3,
                 "num_decoder_layers": 3,
-            },
-            "analysis": {
-                "threshold": "high",
             },
         }
 

@@ -1,25 +1,22 @@
 # configs/complete_config.yaml
-# UrbanAI Complete Configuration
-# All configurable parameters for full control over the pipeline
+# UrbanAI Configuration
+# Preprocess Landsat GeoTIFFs, train a ConvLSTM model, and output a predicted raster.
 
 preprocessing:
-  # Temporal parameters
+  # Temporal range based on your available Landsat data
   start_year: 1985
   end_year: 2023
-  interval: 2  # 1 for annual, 2 for biennial
-  season: "07-01_12-31"
-  
-  # Landsat configuration
+  interval: 2  # 1 = annual, 2 = biennial
+
+  # Landsat satellite version for band mapping (5, 7, 8, or 9)
   landsat_version: 8
-  
-  # Tocantins Framework parameters
-  # IMPORTANT: Setting 'enabled: false' will disable IS/SS calculation throughout the pipeline
-  # This affects:
-  #   - Preprocessing: Only 5-band features will be calculated (NDBI, NDVI, NDWI, NDBSI, LST)
-  #   - Model: Input/output channels will be set to 5 automatically
-  #   - Analysis: Default weights will exclude IS/SS metrics
+
+  # Tocantins Framework (IS/SS metrics)
+  # Set enabled: true to include Impact Score and Severity Score as model channels.
+  # When disabled, the model uses 5 channels: NDBI, NDVI, NDWI, NDBSI, LST.
+  # When enabled, the model uses 7 channels: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS.
   tocantins:
-    enabled: true  # Set to false to skip IS/SS calculation during preprocessing
+    enabled: false
     k_threshold: 1.5
     spatial_params:
       min_anomaly_size: 1
@@ -34,179 +31,52 @@ preprocessing:
       random_state: 42
 
 model:
-  # Architecture
-  architecture: convlstm
-  # NOTE: input_channels and output_channels are auto-configured based on tocantins.enabled
-  # - If tocantins.enabled=true: 7 channels (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
-  # - If tocantins.enabled=false: 5 channels (NDBI, NDVI, NDWI, NDBSI, LST)
-  # You can override these values explicitly if needed
-  input_channels: 7
-  output_channels: 7
+  # input_channels and output_channels are auto-configured from tocantins.enabled:
+  #   tocantins disabled: 5 channels (NDBI, NDVI, NDWI, NDBSI, LST)
+  #   tocantins enabled:  7 channels (NDBI, NDVI, NDWI, NDBSI, LST, IS, SS)
+  # Override explicitly only if needed.
+  input_channels: 5
+  output_channels: 5
   hidden_dims: [64, 128, 256, 256, 128, 64]
   kernel_size: 3
   num_encoder_layers: 3
   num_decoder_layers: 3
-  bias: true
 
 training:
-  # Training hyperparameters
   epochs: 100
   batch_size: 8
   learning_rate: 0.001
   optimizer: adam  # adam, adamw, sgd
-  
-  # Data split configuration
+
   train_val_split:
     method: temporal  # temporal, random, or manual
-    train_ratio: 0.8  # For temporal/random split
-    # For manual split, specify years:
-    # train_years: [1985, 1987, ..., 2015]
-    # val_years: [2017, 2019, ..., 2023]
-  
-  # Sequence parameters
+    train_ratio: 0.8
+
   sequence_length: 10
   prediction_horizon: 1
-  
-  # Normalization
-  normalize: true
+
   normalization_method: zscore  # zscore, minmax, robust
-  
-  # Data augmentation
+
   augmentation:
     enabled: true
     horizontal_flip_prob: 0.5
     vertical_flip_prob: 0.5
     rotation_prob: 0.5
-    rotation_angles: [90, 180, 270]  # Degrees for random rotation
-    noise_prob: 0.0  # Probability of adding Gaussian noise
-    noise_std: 0.01  # Standard deviation of noise
-  
-  # Optimization
+    noise_prob: 0.0
+    noise_std: 0.01
+
   gradient_clip: 1.0
-  weight_decay: 0.0
-  
-  # Learning rate scheduling
-  lr_scheduler:
-    enabled: false
-    type: step  # step, cosine, plateau
-    step_size: 30  # For StepLR
-    gamma: 0.1  # For StepLR
-    patience: 10  # For ReduceLROnPlateau
-    factor: 0.5  # For ReduceLROnPlateau
-  
-  # Early stopping
+  gradient_accumulation_steps: 1  # Increase to reduce effective memory usage
+  num_workers: 4
+
   early_stopping:
     enabled: true
     patience: 15
-    min_delta: 0.0001
-    monitor: val_loss  # val_loss, val_mae, val_rmse
-  
-  # Checkpointing
-  checkpointing:
-    save_best: true
-    save_last: true
-    save_every_n_epochs: 10
-    keep_n_checkpoints: 3  # Keep only N best checkpoints
-  
-  # Data loading
-  num_workers: 4
-  pin_memory: true
-  cache_in_memory: false  # Cache all data in RAM (faster but memory-intensive)
 
 prediction:
-  # Prediction parameters
   calculate_uncertainty: false
-  uncertainty_method: mc_dropout  # mc_dropout, ensemble
-  mc_samples: 10  # Number of Monte Carlo samples
-  
-  # Output configuration
-  save_intermediate: false
-  output_format: geotiff  # geotiff, netcdf
-  compression: lzw
-
-analysis:
-  # Intervention analysis
-  threshold: high  # low, medium, high, or custom value (0.0-1.0)
-  threshold_values:
-    low: 0.3
-    medium: 0.5
-    high: 0.7
-  
-  min_area_pixels: 10
-  min_area_m2: 900  # Minimum area in square meters (for 30m pixels)
-  
-  # Priority scoring weights (CONFIGURABLE - actively used by ResidualCalculator)
-  # These weights determine how different metrics are combined to calculate
-  # intervention priorities. Higher weight = more importance in the final score.
-  # Weights are normalized automatically (don't need to sum to 1.0).
-  #
-  # IMPORTANT: If tocantins.enabled=false, the default weights will automatically
-  # exclude IS and SS metrics. The weights below are used when Tocantins is enabled.
-  # When disabled, defaults are: LST: 0.5, NDVI: 0.3, NDBI: 0.2
-  #
-  # You can customize these to match your regional priorities or research focus.
-  priority_weights:
-    LST: 0.4   # Land Surface Temperature - direct measure of surface heat
-    IS: 0.3    # Impact Score - spatial extent of thermal anomaly (from Tocantins)
-    SS: 0.2    # Severity Score - intensity of thermal anomaly (from Tocantins)
-    NDBI: 0.1  # Normalized Difference Built-up Index - urbanization proxy
-  
-  # Output options
-  save_geojson: true
-  save_raster: true
-  save_statistics: true
-
-visualization:
-  # Visualization parameters
-  enabled: true
-  dpi: 300
-  figure_size: [12, 10]
-  
-  # Colormaps
-  colormaps:
-    LST: RdYlBu_r
-    NDVI: RdYlGn
-    NDBI: RdYlGn_r
-    IS: hot
-    SS: hot
-    priorities: YlOrRd
-  
-  # Map generation
-  generate_temporal_evolution: true
-  generate_prediction_maps: true
-  generate_intervention_maps: true
-  generate_comparison_maps: true
-  
-  # Plot customization
-  font_size: 11
-  title_font_size: 14
-  colorbar_label_size: 11
-  show_grid: true
-  grid_alpha: 0.3
+  mc_samples: 20  # Monte Carlo samples when calculate_uncertainty is true
 
 logging:
-  # Logging configuration
-  level: INFO  # DEBUG, INFO, WARNING, ERROR
-  log_to_file: true
-  log_to_console: true
-  log_format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+  level: INFO
 
-device:
-  # Compute device
-  use_gpu: auto  # auto, cuda, cpu
-  gpu_id: 0  # GPU device ID if multiple GPUs available
-
-# Advanced options
-advanced:
-  # Reproducibility
-  random_seed: 42
-  deterministic: false  # Enable deterministic algorithms (slower)
-  
-  # Memory management
-  clear_cache_every_n_epochs: 5
-  mixed_precision: false  # Use automatic mixed precision (AMP)
-  
-  # Debugging
-  debug_mode: false
-  profile_performance: false
-  validate_data: true  # Validate data during loading
