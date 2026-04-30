@@ -248,7 +248,8 @@ class UrbanAIPipeline:
         files = sorted(data_dir.glob("*_features*.tif"))
         if not files:
             return None
-        return max(self._extract_year(f.name) for f in files)
+        years = [self._extract_year(f.name) for f in files]
+        return max(years)
 
     @staticmethod
     def _extract_year(filename: str) -> int:
