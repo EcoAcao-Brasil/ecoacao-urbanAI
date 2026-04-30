@@ -1,750 +1,201 @@
-# UrbanAI, by EcoAção Brasil (Brazil EcoAction)
+# UrbanAI
 
-**Deep learning framework for spatiotemporal urban heat prediction using ConvLSTM and satellite imagery**
+**ConvLSTM-based prediction of urban heat from multitemporal Landsat imagery**
+
+Developed by [EcoAção Brasil](https://ecoacaobrasil.org)
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![PyPI version](https://badge.fury.io/py/urbanai.svg)](https://badge.fury.io/py/urbanai)
-
-Developed by [EcoAção Brasil](https://ecoacaobrasil.org)
 
 ---
 
 ## Overview
 
-UrbanAI is a comprehensive deep learning framework for assessing the evolution of the Urban Heat Island (UHI) phenomenon with an emphasis on urban climate planning. Built on ConvLSTM architecture, it analyzes historical Landsat data to forecast future thermal landscapes and identify priority areas for urban climate intervention.
+UrbanAI trains a ConvLSTM encoder-decoder on a temporal sequence of Landsat-derived rasters and outputs a predicted raster for a user-specified future year. The predicted raster contains the same spectral indices as the training data (NDBI, NDVI, NDWI, NDBSI, LST and, optionally, Impact Score and Severity Score from the Tocantins Framework).
 
-**Key Feature**: UrbanAI is fully modular and does not assume any specific temporal range - you define your own data years, prediction targets, and analysis periods based on your available satellite imagery.
-
-### Key Features
-
-- **Flexible Temporal Configuration**: Works with any date range from your Landsat data (not limited to 1985-2025)
-- **Spatiotemporal Deep Learning**: ConvLSTM-based architecture for temporal pattern learning
-- **Multi-metric Prediction**: LST, NDBI, NDVI, NDWI, NDBSI, and intra-urban thermal anomaly metrics (Severity Score and Impact Score)
-- **Tocantins Integration**: Integration with the [Tocantins Framework](https://github.com/EcoAcao-Brasil/tocantins-framework) for Impact Score (IS) and Severity Score (SS) calculation
-- **Intervention Prioritization**: Automated identification of critical urban heat mitigation zones
-- **Production Ready**: Designed for research and platform integration
-- **Scalable Architecture**: GPU-optimized, batch processing, cloud-deployment ready
+**Current scope:** preprocessing → training → predicted raster output.  
+Comparison of predictions against a future observed state and intervention guidance are planned for a later version.
 
 ---
 
 ## Installation
 
-### From PyPI (Recommended) - Standard
-
 ```bash
 pip install urbanai
 ```
 
-### Requirements
-- GDAL must be installed separately (pre-installed in Google Colab)
-- For local environments: `conda install -c conda-forge gdal`
+**Requirements:** Python 3.8+, GDAL (install via conda: `conda install -c conda-forge gdal`)
 
 ---
 
 ## Quick Start
 
-### Basic Usage with Custom Years
-
 ```python
 from urbanai import UrbanAIPipeline
 
-# Initialize pipeline with your specific temporal range
 pipeline = UrbanAIPipeline(
-    input_dir="data/raw",
+    input_dir="data/raw",      # directory of raw Landsat GeoTIFFs
     output_dir="results",
     config={
         "preprocessing": {
-            "start_year": 2000,  # Your earliest data year
-            "end_year": 2022,    # Your most recent data year
-            "interval": 2        # Biennial or annual (1)
+            "start_year": 2000,
+            "end_year": 2022,
+            "interval": 2,       # biennial
         },
         "training": {
             "epochs": 100,
-            "batch_size": 8
-        }
-    }
-)
-
-# Run complete workflow - predict any future year
-pipeline.run(
-    preprocess=True,
-    train=True,
-    predict_year=2030,  # Any year beyond your end_year
-    analyze_interventions=True
-)
-
-# Access results
-predictions = pipeline.get_predictions()
-intervention_map = pipeline.get_intervention_priorities()
-```
-
-### Example: Different Temporal Scenarios
-
-```python
-# Scenario 1: Long-term historical analysis (40 years)
-config_historical = {
-    "preprocessing": {
-        "start_year": 1985,
-        "end_year": 2023,
-        "interval": 2
-    }
-}
-pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_historical)
-pipeline.run(predict_year=2035)  # 12-year prediction
-
-# Scenario 2: Recent high-resolution analysis (annual data)
-config_recent = {
-    "preprocessing": {
-        "start_year": 2015,
-        "end_year": 2023,
-        "interval": 1  # Annual instead of biennial
+            "batch_size": 8,
+        },
     },
-    "training": {
-        "sequence_length": 8  # Adjust based on your interval
-    }
-}
-pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_recent)
-pipeline.run(predict_year=2028)  # 5-year prediction
-
-# Scenario 3: Mid-term focused study
-config_midterm = {
-    "preprocessing": {
-        "start_year": 2010,
-        "end_year": 2020,
-        "interval": 2
-    }
-}
-pipeline = UrbanAIPipeline(input_dir="data/raw", output_dir="results", config=config_midterm)
-pipeline.run(predict_year=2025)
-```
-
-### Step-by-Step Workflow
-
-```python
-from urbanai import preprocessing, models, training, prediction, analysis
-
-# 1. Prepare data with your specific years
-processor = preprocessing.TemporalDataProcessor(
-    raw_dir="data/raw",
-    output_dir="data/processed"
 )
 
-# Define YOUR years based on available Landsat data
-my_years = list(range(2000, 2023, 2))  # 2000, 2002, ..., 2022
-
-processor.process_all_years(
-    years=my_years,
-    calculate_indices=True,
-    calculate_tocantins=True
-)
-
-# 2. Train model (automatically uses available years)
-trainer = training.ConvLSTMTrainer(
-    data_dir="data/processed",
-    model_config="configs/model_config.yaml"
-)
-trainer.train(epochs=100, batch_size=8)
-
-# 3. Predict any future year (must be beyond your data range)
-predictor = prediction.FuturePredictor(
-    model_path="models/convlstm_best.pth",
-    input_year=2022  # Your most recent data year
-)
-predictions_2030 = predictor.predict(target_year=2030)
-
-# 4. Analyze interventions
-analyzer = analysis.InterventionAnalyzer(
-    current_raster="data/processed/2022.tif",
-    predicted_raster=predictions_2030
-)
-priorities = analyzer.identify_priority_zones(
-    threshold="high",
-    save_map=True
-)
+results = pipeline.run(predict_year=2030)
+# Output: results/predictions/2030_predicted.tif
 ```
 
 ---
 
-## Methodology
+## Input Data
 
-### Data Pipeline
+- **Satellite:** Landsat 5 / 7 / 8 / 9, Level-2 Collection 2
+- **Required bands:** SR_B1–B7, ST_B10
+- **Format:** GeoTIFF, one composite per year
+- **Naming convention:** `{YEAR}_{description}_cropped.tif`
+
+---
+
+## Pipeline
 
 ```
-Raw Landsat GeoTIFFs (YOUR CUSTOM DATE RANGE)
-    ↓
-Temporal Organization (configurable interval: annual, biennial, etc.)
-    ↓
-Parallel Processing:
-  ┌─────────────────────────────────────┬─────────────────────────────────────┐
-  │ Spectral Indices (from RAW)         │ Tocantins Framework (from RAW)      │
-  │ - NDBI                               │ - Impact Score (IS)                 │
-  │ - NDVI                               │ - Severity Score (SS)               │
-  │ - NDWI                               │                                     │
-  │ - NDBSI                              │  IMPORTANT: Tocantins requires   │
-  │ - LST                                │ RAW Landsat bands (SR_B*, ST_B*)   │
-  └─────────────────────────────────────┴─────────────────────────────────────┘
-    ↓
-Complete Feature Files: [NDBI, NDVI, NDWI, NDBSI, LST, IS, SS]
-    ↓
-ConvLSTM Training (spatiotemporal sequence learning)
-    ↓
-Future Prediction (ANY YEAR beyond your data range)
-    ↓
-Residual Analysis (predicted - current)
-    ↓
-Intervention Priority Mapping
+Raw Landsat GeoTIFFs
+    ↓ TemporalDataProcessor
+Spectral index rasters: NDBI, NDVI, NDWI, NDBSI, LST
+    [+ IS, SS if Tocantins is enabled]
+    ↓ UrbanAITrainer
+ConvLSTM checkpoint (convlstm_best.pth)
+    ↓ FuturePredictor
+{YEAR}_predicted.tif
 ```
 
-### Critical: Tocantins Framework Requirements
+### Tocantins Framework (optional)
 
-The Tocantins Framework requires **RAW Landsat GeoTIFF files** with all original bands (SR_B1-B7, ST_B10). It does NOT work with pre-processed feature files.
+When `preprocessing.tocantins.enabled: true`, two additional channels are calculated using the [Tocantins Framework](https://github.com/EcoAcao-Brasil/tocantins-framework):
+- **IS** (Impact Score) — spatial extent of the thermal anomaly
+- **SS** (Severity Score) — intensity of the thermal anomaly
 
-**Internal Processing Flow:**
-1. **BandProcessor** reads RAW files → calculates spectral indices → saves `*_features.tif`
-2. **TocantinsIntegration** reads RAW files → calculates IS/SS → merges with features → saves `*_features_complete.tif`
-
-Both processors work on the same RAW input files in parallel, then results are merged.
-
-### Tocantins Framework: Two Workflows
-
-UrbanAI supports **two workflows** for the Tocantins Framework (IS/SS metrics):
-
-#### Workflow A: Calculate IS/SS for Every Year (Default with `enabled: true`)
-
-```yaml
-preprocessing:
-  tocantins:
-    enabled: true  # Calculate IS/SS for 1985, 1987, ..., 2025
-
-model:
-  # Auto-configured to 7 channels based on tocantins.enabled
-  input_channels: 7  # NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
-  output_channels: 7
-```
-
-**Use case**: When you need IS/SS as **training features** for spatiotemporal learning. The model learns from historical IS/SS patterns to predict future thermal anomalies.
-
-**Output files**: `YYYY_features_complete.tif` (7 bands)
-
-#### Workflow B: Skip IS/SS During Training
-
-```yaml
-preprocessing:
-  tocantins:
-    enabled: false  # Skip IS/SS calculation during preprocessing
-
-model:
-  # Auto-configured to 5 channels based on tocantins.enabled
-  input_channels: 5  # NDBI, NDVI, NDWI, NDBSI, LST
-  output_channels: 5
-```
-
-**Use case**: Train faster with only spectral indices, then calculate IS/SS **only on the final prediction** (e.g., 2035) using external scripts or the [Tocantins Framework](https://github.com/EcoAcao-Brasil/tocantins-framework) directly.
-
-**Output files**: `YYYY_features.tif` (5 bands)
-
-**Note**: After prediction, you can calculate IS/SS on the predicted raster using the Tocantins Framework independently.
-
-#### Key Differences
-
-| Aspect | Workflow A (enabled=true) | Workflow B (enabled=false) |
-|--------|---------------------------|----------------------------|
-| **Preprocessing Time** | Slower (IS/SS for all years) | Faster (spectral indices only) |
-| **Model Channels** | 7 (includes IS/SS) | 5 (spectral only) |
-| **Training Features** | Temporal IS/SS patterns | Spectral patterns only |
-| **Analysis Weights** | LST: 0.4, IS: 0.3, SS: 0.2, NDBI: 0.1 | LST: 0.5, NDVI: 0.3, NDBI: 0.2 |
-| **Use Case** | Learn from anomaly patterns | Focus on spectral evolution |
-
-### Model Architecture
-
-```python
-ConvLSTM Encoder-Decoder:
-  Input: (batch, time_steps, channels, height, width)
-  - time_steps: Configurable based on your data (e.g., 10-20 timesteps)
-  - channels: 5 or 7 (auto-configured based on tocantins.enabled)
-      * 5 channels: NDBI, NDVI, NDWI, NDBSI, LST
-      * 7 channels: NDBI, NDVI, NDWI, NDBSI, LST, IS, SS
-  
-  Encoder:
-    - ConvLSTM Layer 1: 64 filters
-    - ConvLSTM Layer 2: 128 filters
-    - ConvLSTM Layer 3: 256 filters
-  
-  Decoder:
-    - ConvLSTM Layer 4: 256 filters
-    - ConvLSTM Layer 5: 128 filters
-    - ConvLSTM Layer 6: 64 filters
-    - Conv2D Output: 5 or 7 channels (predicted metrics)
-```
-
-**Note**: The model architecture automatically adapts to the number of input channels based on your `preprocessing.tocantins.enabled` setting.
+This increases the model channel count from 5 to 7. Set `enabled: false` to skip this step and use only the five spectral indices.
 
 ---
 
 ## Configuration
 
-### Configuration Structure
-
-UrbanAI supports both top-level and nested training parameters for flexibility:
-
-```python
-config = {
-    # Option 1: Top-level (simpler)
-    'sequence_length': 4,
-    'batch_size': 8,
-    'learning_rate': 0.001,
-    
-    # Option 2: Nested under 'training' (more organized)
-    'training': {
-        'sequence_length': 4,
-        'batch_size': 8,
-        'learning_rate': 0.001
-    },
-    
-    # Model config (always nested)
-    'model': {
-        'input_channels': 5,
-        'hidden_dims': [64, 128, 256]
-    }
-}
-```
-
-**Priority**: Nested `training.*` > Top-level > Defaults
-
-This flexible structure allows you to:
-- Use simple top-level keys for quick configuration
-- Organize related parameters under `training` for clarity
-- Override any parameter without affecting others (deep merge)
-
-### Preprocessing Config (`configs/preprocessing_config.yaml`)
+Copy `configs/complete_config.yaml` and adjust for your data. Key parameters:
 
 ```yaml
-temporal:
-  start_year: 2000  # YOUR earliest data year
-  end_year: 2022    # YOUR most recent data year
-  interval: 2       # 1 for annual, 2 for biennial, etc.
-  season: "07-01_12-31"  # Seasonal composite (adjust as needed)
-
-indices:
-  calculate_ndbi: true
-  calculate_ndvi: true
-  calculate_ndwi: true
-  calculate_ndbsi: true
-  calculate_lst: true
-
-# Tocantins Framework parameters
-# Note: Tocantins processes RAW Landsat files internally
-tocantins:
-  enabled: true
-  k_threshold: 1.5
-  spatial_params:
-    min_anomaly_size: 1
-    agglutination_distance: 4
-```
-
-### Model Config (`configs/model_config.yaml`)
-
-```yaml
-architecture: "convlstm"
-input_channels: 7
-hidden_dims: [64, 128, 256, 256, 128, 64]
-kernel_size: 3
-num_layers: 6
-batch_first: true
-bias: true
-return_all_layers: false
+preprocessing:
+  start_year: 2000    # earliest available data year
+  end_year: 2022      # most recent available data year
+  interval: 2         # temporal interval in years
+  landsat_version: 8
+  tocantins:
+    enabled: false    # set true to include IS/SS
 
 training:
   epochs: 100
   batch_size: 8
-  learning_rate: 0.001
-  optimizer: "adam"
-  loss_function: "mse"
-  
-  # Adjust sequence_length based on your temporal resolution
-  # For biennial data with 40 years (20 timesteps): sequence_length: 10
-  # For annual data with 20 years: sequence_length: 10-15
-  sequence_length: 10
-  
-  early_stopping:
-    patience: 15
-    min_delta: 0.0001
+  sequence_length: 10   # input sequence length
+  normalization_method: zscore
+  gradient_accumulation_steps: 1  # increase to reduce memory usage
+
+prediction:
+  calculate_uncertainty: false  # enable MC dropout uncertainty
 ```
 
-### Customizing Intervention Priority Weights
+### Gradient accumulation
 
-The intervention analysis uses a weighted combination of metrics to identify priority zones for urban heat mitigation. You can customize these weights in your configuration file or when using the `ResidualCalculator` directly.
+For limited RAM, set `gradient_accumulation_steps > 1`:
 
-#### Configuration File
-
-```yaml
-analysis:
-  threshold: high  # low, medium, high, or custom value (0.0-1.0)
-  
-  # Priority scoring weights (configurable)
-  priority_weights:
-    LST: 0.4   # Land Surface Temperature - direct heat measure
-    IS: 0.3    # Impact Score - spatial extent of thermal anomaly
-    SS: 0.2    # Severity Score - intensity of thermal anomaly  
-    NDBI: 0.1  # Normalized Difference Built-up Index
-```
-
-**Default weights** (if not specified): `LST=0.4, IS=0.3, SS=0.2, NDBI=0.1`
-
-**Important**: Weights don't need to sum to 1.0 - they will be normalized automatically during the residual calculation.
-
-#### Programmatic Usage
-
-```python
-from urbanai.analysis import ResidualCalculator
-
-# Example: Emphasize LST over other metrics
-analyzer = ResidualCalculator(
-    current_raster="data/processed/2022_features_complete.tif",
-    future_raster="predictions/2030_prediction.tif",
-    weights={
-        "LST": 0.5,   # Increase LST importance
-        "IS": 0.25,   # Impact Score
-        "SS": 0.20,   # Severity Score
-        "NDBI": 0.05  # Built-up index
-    }
-)
-residuals = analyzer.calculate_all_residuals()
-```
-
-**Metric Descriptions:**
-- **LST** (Land Surface Temperature): Direct measure of surface heat
-- **IS** (Impact Score): Spatial extent of thermal anomalies (from Tocantins Framework)
-- **SS** (Severity Score): Intensity of thermal anomalies (from Tocantins Framework)
-- **NDBI** (Normalized Difference Built-up Index): Proxy for urbanization level
+| RAM  | batch_size | gradient_accumulation_steps | Effective batch |
+|------|-----------|----------------------------|-----------------|
+| 24GB | 8         | 1                          | 8               |
+| 12GB | 2         | 4                          | 8               |
+| 8GB  | 1         | 8                          | 8               |
 
 ---
 
-## Training on Limited RAM
-
-For large datasets on consumer hardware, use gradient accumulation to train models without running out of memory:
-
-### What is Gradient Accumulation?
-
-Instead of updating weights after every batch, gradients are accumulated over multiple small batches, then weights are updated once. This gives the training quality of large batches with the memory footprint of small batches.
-
-**Example:**
-- Physical batch_size = 2 (fits in RAM)
-- gradient_accumulation_steps = 4
-- **Effective batch_size = 2 × 4 = 8** (same training quality)
-
-### Configuration
-
-```python
-config = {
-    'training': {
-        'batch_size': 2,  # What fits in your RAM
-        'gradient_accumulation_steps': 4,  # Effective batch_size = 2×4 = 8
-    }
-}
-
-trainer = UrbanAITrainer(
-    data_dir="data/processed",
-    output_dir="results",
-    config=config
-)
-```
-
-### Hardware Guidelines
-
-**Rule of thumb:**
-- **12GB RAM**: batch_size=2, gradient_accumulation_steps=4
-- **8GB RAM**: batch_size=1, gradient_accumulation_steps=8
-- **24GB+ RAM**: batch_size=8, gradient_accumulation_steps=1 (or omit)
-
-### Benefits
-
-✅ Train on **all data** regardless of RAM  
-✅ Maintain **training quality** of large batches  
-✅ **User controls** trade-off between speed and memory  
-✅ **Simple**: One parameter to configure  
-✅ **Backward compatible**: Defaults to normal behavior (gradient_accumulation_steps=1)
-
-### Example: Very Limited RAM
-
-```python
-# For minimal hardware (8GB RAM or less)
-config = {
-    'training': {
-        'batch_size': 1,  # Minimum - one sample at a time
-        'gradient_accumulation_steps': 8,  # High accumulation
-    }
-}
-# Behavior: Effective batch_size = 8, only 1 sample in RAM at a time
-```
-
----
-
-## Input Data Requirements
-
-### Landsat Collection
-
-- **Satellite**: Landsat 5/7/8/9
-- **Collection**: Level-2, Collection 2
-- **Bands**: SR_B1-B7, ST_B10, QA_PIXEL (**Required for Tocantins**)
-- **Temporal Range**: YOUR CUSTOM RANGE (e.g., 2000-2022, 1985-2023, etc.)
-- **Temporal Resolution**: Annual, biennial, or custom intervals
-- **Season**: Configurable (e.g., dry season, growing season)
-- **Spatial Resolution**: 30m
-- **Format**: GeoTIFF
-
-### File Naming Convention
-
-```
-L[5|7|8|9]_GeoTIFF_YYYY-MM-DD_YYYY-MM-DD_cropped.tif
-
-Examples:
-L5_GeoTIFF_2000-07-01_2000-12-31_cropped.tif
-L8_GeoTIFF_2022-07-01_2022-12-31_cropped.tif
-```
-
-### Important Notes on Data Requirements
-
-1. **RAW Files Required**: Your input directory must contain RAW Landsat GeoTIFFs with all bands
-2. **Tocantins Dependency**: The Tocantins Framework needs access to raw spectral and thermal bands (SR_B1-B7, ST_B10)
-3. **File Location**: Keep all RAW files in the same directory specified as `input_dir` in the pipeline
-4. **Do Not Pre-Process**: Do not manually calculate indices before running UrbanAI - the pipeline handles this automatically
-
-### Important Notes on Temporal Configuration
-
-1. **Start and End Years**: Define these based on YOUR available Landsat data
-2. **Prediction Years**: Can be any year beyond your `end_year`
-3. **Sequence Length**: Adjust based on your temporal interval:
-   - Biennial data (40 years → 20 timesteps): use sequence_length 10-12
-   - Annual data (20 years): use sequence_length 10-15
-   - The model needs enough history to learn patterns
-4. **Validation**: The framework automatically validates year consistency
-
-### Google Earth Engine Script
-
-Use the provided GEE script (`scripts/gee_export.js`) to export Landsat composites with cloud masking and scale factor application. The script is flexible and works for any date range.
-
----
-
-## Output Files
-
-### Processed Features
-
-```
-data/processed/
-├── indices/
-│   ├── 2000_features.tif       # 5-band: NDBI, NDVI, NDWI, NDBSI, LST
-│   ├── 2002_features.tif
-│   └── ...
-├── 2000_features_complete.tif  # 7-band: includes IS, SS
-├── 2002_features_complete.tif
-└── ...
-```
-
-### Model Outputs
-
-```
-results/
-├── models/
-│   ├── convlstm_best.pth
-│   ├── convlstm_last.pth
-│   └── training_history.csv
-├── predictions/
-│   ├── 2030_predicted.tif      # Your target year
-│   ├── 2030_residuals.tif      # change from latest data year
-│   └── uncertainty_map.tif
-└── analysis/
-    ├── intervention_priorities.tif
-    ├── intervention_priorities.geojson
-    ├── hotspot_statistics.csv
-    └── visualization/
-        ├── temporal_evolution.png
-        ├── prediction_map.png
-        └── intervention_map.png
-```
-
----
-
-## Command Line Interface
+## CLI
 
 ```bash
-# Preprocess data (automatically detects years from filenames)
-urbanai preprocess --input data/raw --output data/processed --config configs/preprocessing_config.yaml
+# Run complete pipeline
+urbanai run --input data/raw --output results --predict-year 2030
 
-# Train model (uses all available processed years)
-urbanai train --data data/processed --config configs/model_config.yaml --epochs 100
-
-# Predict specific future year
-urbanai predict --model models/convlstm_best.pth --year 2030 --output results/predictions
-
-# Generate intervention map
-urbanai analyze --current data/processed/2022_features_complete.tif --predicted results/predictions/2030_predicted.tif --output results/analysis
+# Run individual stages
+urbanai preprocess --input data/raw --output results/processed
+urbanai train --data results/processed --output results/models
+urbanai predict --model results/models/convlstm_best.pth \
+                --data results/processed --year 2030 --output results/predictions
 ```
 
 ---
 
-## Troubleshooting
+## Module API
 
-### Common Issues
-
-#### 1. "Index out of bounds" error with Tocantins
-
-**Error**: `IndexError: index 5 is out of bounds for axis 0 with size 5`
-
-**Cause**: Trying to run Tocantins on processed feature files instead of RAW Landsat files.
-
-**Solution**: Ensure your `input_dir` contains RAW Landsat GeoTIFFs with all bands (SR_B1-B7, ST_B10). The pipeline handles the workflow internally.
-
-#### 2. Missing bands in RAW files
-
-**Error**: `Missing required bands: ['swir1', 'thermal']`
-
-**Cause**: RAW Landsat file doesn't contain all required bands.
-
-**Solution**: Re-export from Google Earth Engine using the provided script, ensuring all bands are included.
-
-#### 3. Year validation errors
-
-**Error**: `Target year must be greater than current year`
-
-**Cause**: Trying to predict a year within or before your training data range.
-
-**Solution**: Ensure `predict_year > end_year` in your configuration.
-
----
-
-## Validation and Error Handling
-
-UrbanAI includes comprehensive validation:
+Each stage can be used independently:
 
 ```python
-# The pipeline validates:
-# 1. Target year is beyond your data range
-if target_year <= current_year:
-    raise ValueError(f"Target year must be > {current_year}")
+from urbanai.preprocessing import TemporalDataProcessor
+from urbanai.training import UrbanAITrainer
+from urbanai.prediction import FuturePredictor
 
-# 2. Sufficient historical data for training
-if n_years < sequence_length:
-    raise ValueError(f"Need at least {sequence_length} years of data")
+# Preprocess
+processor = TemporalDataProcessor(raw_dir="data/raw", output_dir="data/processed")
+processor.process_all_years()
 
-# 3. Consistent temporal intervals
-# Automatically detects and validates your temporal spacing
+# Train
+trainer = UrbanAITrainer(data_dir="data/processed", output_dir="models")
+trainer.train(epochs=100, batch_size=8)
 
-# 4. RAW file availability for Tocantins
-if tocantins_enabled and not raw_files:
-    raise ValueError("Tocantins requires RAW Landsat files")
+# Predict
+predictor = FuturePredictor(
+    model_path="models/convlstm_best.pth",
+    data_dir="data/processed",
+    output_dir="predictions",
+)
+predictor.predict(current_year=2022, target_year=2030)
 ```
 
 ---
 
-## Best Practices
+## Model Architecture
 
-### Temporal Configuration
+ConvLSTM encoder-decoder operating on sequences of shape `(batch, time, channels, H, W)`.
 
-1. **Data Availability**: Use continuous temporal data without large gaps
-2. **Minimum History**: At least 10 timesteps recommended for robust training
-3. **Prediction Horizon**: Longer predictions (>10 years) increase uncertainty
-4. **Validation Split**: Reserve latest years for validation (automatic in framework)
+```
+Encoder:
+  ConvLSTM  64 filters
+  ConvLSTM 128 filters
+  ConvLSTM 256 filters
 
-### Data Management
-
-1. **Keep RAW Files**: Don't delete RAW Landsat files after preprocessing - Tocantins needs them
-2. **Organize by Year**: Use consistent naming conventions for easy year detection
-3. **Backup Outputs**: Processed features can be regenerated, but save model checkpoints
-
-### Example Configurations
-
-```python
-# Good: 40 years of biennial data (20 timesteps)
-config = {
-    "preprocessing": {
-        "start_year": 1985,
-        "end_year": 2023,
-        "interval": 2
-    },
-    "training": {
-        "sequence_length": 10
-    }
-}
-
-# Good: 15 years of annual data
-config = {
-    "preprocessing": {
-        "start_year": 2008,
-        "end_year": 2022,
-        "interval": 1
-    },
-    "training": {
-        "sequence_length": 12
-    }
-}
-
-# Caution: Too few timesteps
-config = {
-    "preprocessing": {
-        "start_year": 2015,
-        "end_year": 2022,
-        "interval": 2  # Only 4 timesteps!
-    }
-}
-# This will raise a validation error
+Decoder:
+  ConvLSTM 256 filters
+  ConvLSTM 128 filters
+  ConvLSTM  64 filters
+  Conv2D → 5 or 7 output channels
 ```
 
 ---
 
-## Scientific Foundation
+## Output
 
-UrbanAI implements methodologies combining:
+`{YEAR}_predicted.tif` — a multi-band GeoTIFF with the same CRS and spatial extent as the input data, one band per predicted index.
 
-1. **ConvLSTM Architecture**: Shi et al. (2015) - "Convolutional LSTM Network: A Machine Learning Approach for Precipitation Nowcasting"
-2. **Tocantins Framework**: Borges (2025) - For thermal anomaly detection and quantification
-3. **Urban Heat Island Analysis**: Standard remote sensing indices and thermal analysis
-
-### Citation
-
-If you use UrbanAI in your research, please cite:
-
-```bibtex
-@software{urbanai_2025,
-  author = {Borges, Isaque Carvalho},
-  title = {UrbanAI: Deep Learning Framework for Spatiotemporal Urban Heat Prediction},
-  year = {2025},
-  publisher = {EcoAção Brasil},
-  url = {https://github.com/EcoAcao-Brasil/ecoacao-urbanai}
-}
-
-@software{tocantins_framework_2025,
-  author = {Borges, Isaque Carvalho},
-  title = {Tocantins Framework: A Python Library for Assessment of Intra-Urban Thermal Anomaly},
-  year = {2025},
-  publisher = {EcoAção Brasil},
-  url = {https://github.com/EcoAcao-Brasil/tocantins-framework}
-}
-```
-
----
-
-## Contributing
-
-We welcome contributions from the research community! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Optional: `{YEAR}_uncertainty.tif` when `calculate_uncertainty: true` (Monte Carlo dropout).
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE)
 
----
+Contact: isaque@ecoacaobrasil.org
 
-## Support
-
-- **Email**: isaque@ecoacaobrasil.org
-- **Issues**: [GitHub Issues](https://github.com/EcoAcao-Brasil/ecoacao-urbanai/issues)
-
----
-
-## Keywords
-
-urban heat island, deep learning, ConvLSTM, spatiotemporal prediction, remote sensing, Landsat, climate adaptation, thermal anomaly detection, urban planning, machine learning, PyTorch, geospatial analysis, time series forecasting, modular framework

@@ -1,7 +1,5 @@
 """
 Command Line Interface for UrbanAI
-
-Provides CLI commands for running UrbanAI workflows.
 """
 
 import argparse
@@ -20,15 +18,11 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="UrbanAI - Urban Heat Island Prediction Framework",
+        description="UrbanAI - Spatiotemporal Urban Heat Prediction",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"UrbanAI {__version__}",
-    )
+    parser.add_argument("--version", action="version", version=f"UrbanAI {__version__}")
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
@@ -57,19 +51,12 @@ def main() -> None:
     train_parser.add_argument("--device", default="auto", help="Device")
 
     # Predict only
-    predict_parser = subparsers.add_parser("predict", help="Predict future only")
+    predict_parser = subparsers.add_parser("predict", help="Generate predicted raster")
     predict_parser.add_argument("--model", required=True, help="Model checkpoint path")
-    predict_parser.add_argument("--data", required=True, help="Data directory")
+    predict_parser.add_argument("--data", required=True, help="Processed data directory")
     predict_parser.add_argument("--year", type=int, required=True, help="Year to predict")
     predict_parser.add_argument("--output", required=True, help="Output directory")
     predict_parser.add_argument("--device", default="auto", help="Device")
-
-    # Analyze only
-    analyze_parser = subparsers.add_parser("analyze", help="Analyze predictions")
-    analyze_parser.add_argument("--current", required=True, help="Current year raster")
-    analyze_parser.add_argument("--predicted", required=True, help="Predicted raster")
-    analyze_parser.add_argument("--output", required=True, help="Output directory")
-    analyze_parser.add_argument("--config", help="Configuration file (optional)")
 
     args = parser.parse_args()
 
@@ -77,9 +64,8 @@ def main() -> None:
         parser.print_help()
         sys.exit(1)
 
-    # Setup logging
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if getattr(args, "verbose", False) else logging.INFO,
         format="%(asctime)s | %(levelname)-8s | %(message)s",
     )
 
@@ -92,8 +78,6 @@ def main() -> None:
             run_train(args)
         elif args.command == "predict":
             run_predict(args)
-        elif args.command == "analyze":
-            run_analyze(args)
     except Exception as e:
         logging.error(f"Error: {str(e)}")
         sys.exit(1)
@@ -112,10 +96,9 @@ def run_pipeline(args) -> None:
     results = pipeline.run(predict_year=args.predict_year)
 
     if results["status"] == "success":
-        logger.info("\nPipeline completed successfully.")
-        logger.info(f"Results saved to: {args.output}")
+        logger.info(f"Pipeline completed. Results: {args.output}")
     else:
-        logger.info("\n Pipeline failed")
+        logger.error("Pipeline failed")
         sys.exit(1)
 
 
@@ -130,7 +113,7 @@ def run_preprocess(args) -> None:
     )
 
     results = processor.process_all_years()
-    logger.info(f"\n Preprocessing complete: {len(results)} years processed")
+    logger.info(f"Preprocessing complete: {len(results)} years processed")
 
 
 def run_train(args) -> None:
@@ -149,15 +132,13 @@ def run_train(args) -> None:
         batch_size=args.batch_size,
     )
 
-    logger.info("\n Training complete")
-    logger.info(f"Best validation loss: {results['best_loss']:.6f}")
+    logger.info(f"Training complete. Best validation loss: {results['best_loss']:.6f}")
 
 
 def run_predict(args) -> None:
-    """Run prediction only."""
+    """Generate a predicted raster for a future year."""
     from urbanai.prediction import FuturePredictor
 
-    # Dynamically determine the most recent year from available data
     data_dir = Path(args.data)
     current_year = _get_most_recent_year(data_dir)
 
@@ -185,70 +166,20 @@ def run_predict(args) -> None:
         save_outputs=True,
     )
 
-    logger.info(f"\n Prediction complete for {args.year}")
-    logger.info(f"Output: {results['output_path']}")
-
-
-def run_analyze(args) -> None:
-    """Run analysis only."""
-    import yaml
-
-    from urbanai.analysis import InterventionAnalyzer, ResidualCalculator
-
-    # Load config if provided
-    weights = None
-    if args.config:
-        config_path = Path(args.config)
-        if config_path.exists():
-            with open(config_path) as f:
-                config = yaml.safe_load(f)
-                weights = config.get("analysis", {}).get("priority_weights")
-
-    # Calculate residuals
-    residual_calc = ResidualCalculator(
-        current_raster=args.current,
-        future_raster=args.predicted,
-        output_dir=args.output,
-        weights=weights,
-    )
-
-    residuals = residual_calc.calculate_all_residuals()
-
-    # Analyze interventions
-    analyzer = InterventionAnalyzer(
-        residuals_path=residuals["combined_residuals"],
-        current_raster=args.current,
-        output_dir=args.output,
-    )
-
-    priorities = analyzer.identify_priority_zones(save_geojson=True)
-
-    logger.info("\n Analysis complete")
-    logger.info(f"Priority zones: {priorities['n_hotspot_zones']}")
-    logger.info(f"Output: {args.output}")
+    logger.info(f"Prediction complete: {results['output_path']}")
 
 
 def _get_most_recent_year(data_dir: Path) -> Optional[int]:
-    """
-    Dynamically determine the most recent year from available processed files.
-
-    Args:
-        data_dir: Directory containing processed feature files
-
-    Returns:
-        Most recent year, or None if no files found
-    """
+    """Return the most recent year from processed feature files in data_dir."""
     files = sorted(data_dir.glob("*_features*.tif"))
-
     if not files:
         return None
-
-    years = sorted([_extract_year(f.name) for f in files])
+    years = [_extract_year(f.name) for f in files]
     return max(years)
 
 
 def _extract_year(filename: str) -> int:
-    """Extract year from filename."""
+    """Extract a 4-digit year from a filename."""
     match = re.search(r"(\d{4})", filename)
     if match:
         return int(match.group(1))

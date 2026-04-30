@@ -3,6 +3,8 @@
 import torch
 from typing import Dict
 
+ALL_CHANNEL_NAMES = ["NDBI", "NDVI", "NDWI", "NDBSI", "LST", "IS", "SS"]
+
 
 def calculate_metrics(
     predictions: torch.Tensor,
